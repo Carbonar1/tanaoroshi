@@ -25,6 +25,18 @@ type ScanResult = {
   } | null;
 };
 
+function LabelThumb({ blob }: { blob: Blob }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [blob]);
+  if (!url) return <div className="w-28 h-28 bg-gray-100 rounded" />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt="" className="w-28 h-28 object-cover rounded border" />;
+}
+
 async function blobToBase64(b: Blob): Promise<string> {
   const buf = await b.arrayBuffer();
   const bytes = new Uint8Array(buf);
@@ -235,18 +247,12 @@ export default function LabelsPage() {
           const matchedItem = l.item_id
             ? items?.find((x) => x.id === l.item_id)
             : null;
-          const url = URL.createObjectURL(l.blob);
           return (
             <section
               key={l.id}
               className="bg-white rounded shadow p-3 flex gap-3"
             >
-              <img
-                src={url}
-                alt=""
-                className="w-28 h-28 object-cover rounded border"
-                onLoad={() => URL.revokeObjectURL(url)}
-              />
+              <LabelThumb blob={l.blob} />
               <div className="flex-1 flex flex-col gap-1">
                 <div className="text-xs text-gray-500">
                   {new Date(l.taken_at).toLocaleString("ja-JP")}
