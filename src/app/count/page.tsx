@@ -71,6 +71,47 @@ export default function CountPage() {
     [stocktake?.id],
   );
 
+  const prevMonthOrder = useLiveQuery(
+    async () => {
+      if (!stocktake) return [] as number[];
+      const all = await db.stocktakes.orderBy("month").toArray();
+      const idx = all.findIndex((s) => s.id === stocktake.id);
+      const prev = idx > 0 ? all[idx - 1] : null;
+      if (!prev) return [] as number[];
+      const entries = await db.count_entries
+        .where("stocktake_id")
+        .equals(prev.id!)
+        .sortBy("counted_at");
+      const seen = new Set<number>();
+      const order: number[] = [];
+      for (const e of entries) {
+        if (!seen.has(e.item_id)) {
+          seen.add(e.item_id);
+          order.push(e.item_id);
+        }
+      }
+      return order;
+    },
+    [stocktake?.id],
+  );
+
+  const nextSuggestions = useMemo(() => {
+    if (!items || !prevMonthOrder || prevMonthOrder.length === 0) return [];
+    const enteredNow = new Set<number>();
+    recent?.forEach((e) => enteredNow.add(e.item_id));
+    const lastItemId = recent?.[0]?.item_id;
+    const idx = lastItemId ? prevMonthOrder.indexOf(lastItemId) : -1;
+    const start = idx >= 0 ? idx + 1 : 0;
+    const picks: typeof items = [];
+    for (let i = start; i < prevMonthOrder.length && picks.length < 3; i++) {
+      const id = prevMonthOrder[i];
+      if (enteredNow.has(id)) continue;
+      const it = items.find((x) => x.id === id);
+      if (it) picks.push(it);
+    }
+    return picks;
+  }, [items, prevMonthOrder, recent]);
+
   const candidates = useMemo(() => {
     const q = normalize(query);
     if (!q || !items) return [];
@@ -237,6 +278,28 @@ export default function CountPage() {
               </div>
             )}
           </div>
+
+          {!query && nextSuggestions.length > 0 && (
+            <section className="mt-2">
+              <div className="text-xs text-gray-600 mb-1">
+                次はたぶんこれ（先月の順番から）
+              </div>
+              <div className="flex flex-col gap-1">
+                {nextSuggestions.map((it) => (
+                  <button
+                    key={it.id}
+                    onClick={() => pickItem(it)}
+                    className="text-left bg-indigo-50 border border-indigo-200 rounded p-3 text-base"
+                  >
+                    {it.name}
+                    <span className="text-sm text-gray-500 ml-2">
+                      （{it.unit}）
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           {recent && recent.length > 0 && (
             <section className="mt-4">

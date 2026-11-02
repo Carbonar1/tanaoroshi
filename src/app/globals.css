@@ -30,6 +30,16 @@ textarea {
   font-size: 18px;
 }
 
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+  body {
+    background: white !important;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #ffffff;
