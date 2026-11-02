@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Vercel の実行時間の上限（秒）。Claude の応答が長いときに備える。
+export const maxDuration = 60;
+
 type FindingIn = {
   id: string;
   item: string;

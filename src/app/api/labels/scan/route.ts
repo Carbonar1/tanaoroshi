@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Vercel の実行時間の上限（秒）。
+export const maxDuration = 60;
+
 type Body = {
   images: Array<{
     id: number;

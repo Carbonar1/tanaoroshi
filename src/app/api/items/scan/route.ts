@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Vercel の実行時間の上限（秒）。写真の読み取りは時間がかかる。
+export const maxDuration = 60;
+
 type Body = {
   images: Array<{ mimeType: string; dataBase64: string }>;
 };
