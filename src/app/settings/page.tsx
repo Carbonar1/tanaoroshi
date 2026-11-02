@@ -88,6 +88,48 @@ export default function SettingsPage() {
     setMembersState(next);
   }
 
+  async function seedDemoItemsOnly() {
+    if (
+      !confirm(
+        "デモ用の品目（架空の業者・品目）を今の月に読み込みます。入力記録は作りません。実行しますか？",
+      )
+    )
+      return;
+    const suppliers = await db.suppliers.toArray();
+    const supplierMap = new Map<string, number>();
+    suppliers.forEach((s) => supplierMap.set(s.name, s.id!));
+    let order = suppliers.length;
+    for (const d of DEMO_ITEMS) {
+      let sid = supplierMap.get(d.supplier);
+      if (sid == null) {
+        order += 1;
+        sid = await db.suppliers.add({
+          name: d.supplier,
+          sort_order: order,
+        });
+        supplierMap.set(d.supplier, sid);
+      }
+      const existing = await db.items
+        .where({ supplier_id: sid, name: d.name })
+        .first();
+      const payload = {
+        name: d.name,
+        reading: d.reading,
+        supplier_id: sid,
+        sheet_order: d.sheet_order,
+        unit: d.unit as Unit,
+        is_weight: d.is_weight,
+        unit_price: d.unit_price,
+        last_month_qty: d.last_month_qty,
+        active: 1 as const,
+        is_provisional: 0 as const,
+      };
+      if (existing) await db.items.update(existing.id!, payload);
+      else await db.items.add(payload);
+    }
+    alert(`${DEMO_ITEMS.length} 品目を読み込みました。`);
+  }
+
   async function seedDemo() {
     if (
       !confirm(
@@ -99,12 +141,20 @@ export default function SettingsPage() {
     const demoSt = await createStocktake(demoMonth);
     await setActiveStocktake(demoSt.id!);
 
+    // 二度押しに備えて DEMO の既存入力は消す（品目・発注先は残す）
+    await db.count_entries.where("stocktake_id").equals(demoSt.id!).delete();
+
     const suppliers = await db.suppliers.toArray();
     const supplierMap = new Map<string, number>();
     suppliers.forEach((s) => supplierMap.set(s.name, s.id!));
     let order = suppliers.length;
 
     const dev = deviceId();
+    const now = Date.now();
+    // 「足す」「二重カウント」「別端末の食い違い」を見せる品目は、ここで扱う
+    const SPECIAL = new Set(["田舎味噌", "一味唐辛子", "本みりん"]);
+    const itemIdByName = new Map<string, number>();
+
     for (const d of DEMO_ITEMS) {
       let sid = supplierMap.get(d.supplier);
       if (sid == null) {
@@ -137,7 +187,8 @@ export default function SettingsPage() {
       } else {
         itemId = await db.items.add(payload);
       }
-      if (d.demo_qty != null) {
+      itemIdByName.set(d.name, itemId);
+      if (d.demo_qty != null && !SPECIAL.has(d.name)) {
         await db.count_entries.add({
           client_uid: newClientUid(dev),
           stocktake_id: demoSt.id!,
@@ -146,10 +197,93 @@ export default function SettingsPage() {
           mode: "set",
           counted_by: userName() || "デモ",
           device_id: dev,
-          counted_at: Date.now(),
+          counted_at: now,
+          synced_at: now,
         });
       }
     }
+
+    // シナリオ 1：「足す」 田舎味噌 冷凍庫で 5kg → 厨房の冷蔵庫で 2kg 足す → 合計 7
+    const inakaId = itemIdByName.get("田舎味噌");
+    if (inakaId) {
+      await db.count_entries.add({
+        client_uid: newClientUid(dev),
+        stocktake_id: demoSt.id!,
+        item_id: inakaId,
+        qty: 5,
+        mode: "set",
+        counted_by: "松尾",
+        device_id: dev,
+        counted_at: now,
+        synced_at: now,
+      });
+      await db.count_entries.add({
+        client_uid: newClientUid(dev),
+        stocktake_id: demoSt.id!,
+        item_id: inakaId,
+        qty: 2,
+        mode: "add",
+        counted_by: "松尾",
+        device_id: dev,
+        counted_at: now + 60_000,
+        synced_at: now + 60_000,
+      });
+    }
+
+    // シナリオ 2：2 台から同じ数を近い時刻に「足す」→ 二重カウントの警告
+    const ichimiId = itemIdByName.get("一味唐辛子");
+    if (ichimiId) {
+      await db.count_entries.add({
+        client_uid: newClientUid("demo-a"),
+        stocktake_id: demoSt.id!,
+        item_id: ichimiId,
+        qty: 3,
+        mode: "add",
+        counted_by: "田中",
+        device_id: "demo-a",
+        counted_at: now + 90_000,
+        synced_at: now + 90_000,
+      });
+      await db.count_entries.add({
+        client_uid: newClientUid("demo-b"),
+        stocktake_id: demoSt.id!,
+        item_id: ichimiId,
+        qty: 3,
+        mode: "add",
+        counted_by: "佐藤",
+        device_id: "demo-b",
+        counted_at: now + 120_000,
+        synced_at: now + 120_000,
+      });
+    }
+
+    // シナリオ 3：別端末が違う数を「決定」→ 食い違いの警告
+    const mirinId = itemIdByName.get("本みりん");
+    if (mirinId) {
+      await db.count_entries.add({
+        client_uid: newClientUid("demo-a"),
+        stocktake_id: demoSt.id!,
+        item_id: mirinId,
+        qty: 2,
+        mode: "set",
+        counted_by: "田中",
+        device_id: "demo-a",
+        counted_at: now + 150_000,
+        synced_at: now + 150_000,
+      });
+      await db.count_entries.add({
+        client_uid: newClientUid("demo-b"),
+        stocktake_id: demoSt.id!,
+        item_id: mirinId,
+        qty: 1,
+        mode: "set",
+        counted_by: "佐藤",
+        device_id: "demo-b",
+        counted_at: now + 180_000,
+        synced_at: now + 180_000,
+      });
+    }
+
     alert("デモデータを入れました。月は DEMO に切り替えました。");
     reload();
   }
@@ -540,10 +674,16 @@ export default function SettingsPage() {
           架空の業者と品目で、わざと間違いを含んだ入力を一括で作ります。デモ月（DEMO）に入るので、本番の月とは混ざりません。
         </div>
         <button
+          onClick={seedDemoItemsOnly}
+          className="bg-purple-100 text-purple-900 rounded py-3 text-base"
+        >
+          デモ用の品目だけを読み込む（今の月）
+        </button>
+        <button
           onClick={seedDemo}
           className="bg-purple-600 text-white rounded py-3 text-base font-semibold"
         >
-          デモ用の今月入力を作る
+          デモ用の今月入力を作る（DEMO 月に切替）
         </button>
         <button
           onClick={clearDemo}
