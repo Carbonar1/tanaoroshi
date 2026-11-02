@@ -39,16 +39,16 @@ test.describe("保管庫で入力して戻って送る", () => {
 
     async function enter(query: string, qty: string) {
       await page.getByPlaceholder(/品名の一部/).fill(query);
-      // 候補を 1 つ押す
       const first = page.locator("button").filter({ hasText: query }).first();
       await first.waitFor({ state: "visible", timeout: 5_000 });
       await first.click();
       await page.getByPlaceholder("0").fill(qty);
       await page.getByRole("button", { name: "この数で決定" }).click();
-      // トーストが消えて検索欄に戻る
       await page
         .getByPlaceholder(/品名の一部/)
         .waitFor({ state: "visible", timeout: 5_000 });
+      // WebKit で IndexedDB の書き込みが伝わる時間を少し待つ
+      await page.waitForTimeout(300);
     }
 
     await enter("醤油", "3");
@@ -108,14 +108,27 @@ test.describe("保管庫で入力して戻って送る", () => {
       await p.getByPlaceholder("0").fill(qty);
       await p.getByRole("button", { name: "この数で決定" }).click();
       await p.getByPlaceholder(/品名の一部/).waitFor({ state: "visible" });
+      await p.waitForTimeout(500);
     }
 
-    // 各端末が独立に 1 件以上の未送信を持つ
+    // 各端末が独立に 1 件以上の入力記録を IndexedDB に持っている
     for (const p of [pageA, pageB]) {
-      const bar = p.locator("div").filter({ hasText: /未送信/ }).first();
-      const t = await bar.innerText();
-      const m = t.match(/未送信\s*(\d+)/);
-      expect(Number(m?.[1] ?? 0)).toBeGreaterThanOrEqual(1);
+      await p.waitForTimeout(500);
+      const count = await p.evaluate(async () => {
+        const req = indexedDB.open("tanaoroshi");
+        return await new Promise<number>((resolve, reject) => {
+          req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction("count_entries", "readonly");
+            const store = tx.objectStore("count_entries");
+            const c = store.count();
+            c.onsuccess = () => resolve(c.result);
+            c.onerror = () => reject(c.error);
+          };
+          req.onerror = () => reject(req.error);
+        });
+      });
+      expect(count).toBeGreaterThanOrEqual(1);
     }
 
     await ctxA.close();

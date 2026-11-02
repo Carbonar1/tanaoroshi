@@ -107,26 +107,33 @@ export default function StatusBar() {
   }
 
   useEffect(() => {
+    let mounted = true;
     setOnline(navigator.onLine);
     const current = userName();
     setName(current);
     reloadMembers();
     if (!current) setEditing(true);
+    // 自動送信は、ナビゲーションの衝突を避けるために 1 秒遅らせる
     if (navigator.onLine && hasSupabase() && !autoFiredRef.current) {
       autoFiredRef.current = true;
-      runSync(false);
+      setTimeout(() => {
+        if (mounted) runSync(false);
+      }, 1000);
     }
     const on = () => {
+      if (!mounted) return;
       setOnline(true);
       retryAttemptRef.current = 0;
       if (hasSupabase()) runSync(false);
     };
     const off = () => {
+      if (!mounted) return;
       setOnline(false);
       clearRetry();
     };
     const onVisible = () => {
       if (
+        mounted &&
         document.visibilityState === "visible" &&
         navigator.onLine &&
         hasSupabase() &&
@@ -141,6 +148,7 @@ export default function StatusBar() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
     return () => {
+      mounted = false;
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
       document.removeEventListener("visibilitychange", onVisible);
