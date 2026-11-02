@@ -18,9 +18,11 @@ import {
 import { normalize } from "@/lib/search";
 import { altUnit, convertToItemUnit } from "@/lib/units";
 import { predictNext } from "@/lib/predict";
+import { fmtQty as fmtQtyShared, fmtQtyByUnit } from "@/lib/fmt";
 
-function fmtQty(q: number, isWeight: 0 | 1): string {
-  return isWeight ? q.toFixed(2) : String(q);
+void fmtQtyShared;
+function fmtQty(q: number, isWeight: 0 | 1, unit: Unit): string {
+  return fmtQtyByUnit(q, unit, isWeight);
 }
 
 export default function CountPage() {
@@ -173,7 +175,7 @@ export default function CountPage() {
         : mode === "add"
           ? "足す"
           : "なし";
-    const stored = `${fmtQty(q, selected.is_weight)}${selected.unit}`;
+    const stored = `${fmtQty(q, selected.is_weight, selected.unit)}${selected.unit}`;
     const entered =
       useUnit !== selected.unit
         ? `（入力：${raw}${useUnit} → ${stored}）`
@@ -233,8 +235,8 @@ export default function CountPage() {
       </div>
 
       <h1 className="text-xl font-bold">棚卸しを入力する</h1>
-      <p className="text-xs text-gray-600">
-        ※ 開封済みの袋は数えません。未開封のみ。
+      <p className="bg-amber-100 text-amber-900 rounded-lg px-3 py-2 text-base font-semibold">
+        ⚠ 開封済みの袋は数えません。未開封のみ。
       </p>
 
       {!selected && (
@@ -255,13 +257,13 @@ export default function CountPage() {
                 onClick={() => pickItem(it)}
                 className="text-left bg-white rounded-lg shadow p-4 border active:bg-blue-50"
               >
-                <div className="text-lg font-semibold">
-                  {it.name}
-                  <span className="text-sm text-gray-500 ml-2">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-semibold">{it.name}</span>
+                  <span className="text-xl font-bold text-blue-700">
                     （{it.unit}）
                   </span>
                 </div>
-                <div className="text-xs text-gray-500">
+                <div className="text-sm text-gray-600">
                   {supplierName.get(it.supplier_id) ?? ""}
                   {it.spec ? ` / ${it.spec}` : ""}
                 </div>
@@ -315,7 +317,7 @@ export default function CountPage() {
                       onClick={() => pickFromRecent(e)}
                       className="text-left bg-white rounded border p-2 text-sm"
                     >
-                      {it.name}（{fmtQty(e.qty, it.is_weight)}
+                      {it.name}（{fmtQty(e.qty, it.is_weight, it.unit)}
                       {it.unit}・{e.mode === "set" ? "決定" : "足す"}）
                     </button>
                   );
@@ -328,23 +330,12 @@ export default function CountPage() {
 
       {selected && (
         <section className="flex flex-col gap-3 bg-white rounded-lg p-4 shadow border">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <div className="text-xl font-bold">{selected.name}</div>
-              <div className="text-sm text-gray-600">
+              <div className="text-2xl font-bold">{selected.name}</div>
+              <div className="text-base text-gray-700">
                 {supplierName.get(selected.supplier_id) ?? ""}
                 {selected.spec ? ` / ${selected.spec}` : ""}
-              </div>
-              <div className="text-sm mt-1">
-                今の合計：
-                {selectedTotal == null ? (
-                  <span className="text-gray-400">未入力</span>
-                ) : (
-                  <b>
-                    {fmtQty(selectedTotal, selected.is_weight)}
-                    {selected.unit}
-                  </b>
-                )}
               </div>
             </div>
             <button
@@ -353,10 +344,22 @@ export default function CountPage() {
                 setQtyInput("");
                 setTimeout(() => searchRef.current?.focus(), 50);
               }}
-              className="text-blue-700 underline text-sm"
+              className="text-blue-700 underline text-base px-2 py-1"
             >
               別の品目
             </button>
+          </div>
+
+          <div className="bg-blue-50 rounded-lg px-3 py-2 flex items-baseline justify-between">
+            <span className="text-base text-gray-700">今の合計</span>
+            {selectedTotal == null ? (
+              <span className="text-xl text-gray-500">未入力</span>
+            ) : (
+              <span className="text-3xl font-bold text-blue-900">
+                {fmtQty(selectedTotal, selected.is_weight, selected.unit)}
+                <span className="text-lg ml-1">{selected.unit}</span>
+              </span>
+            )}
           </div>
 
           {altUnit(selected.unit) && (
@@ -400,22 +403,22 @@ export default function CountPage() {
               min={0}
               value={qtyInput}
               onChange={(e) => setQtyInput(e.target.value)}
-              className="flex-1 border rounded-lg px-3 py-5 text-3xl text-right"
+              className="flex-1 border-2 border-gray-400 rounded-lg px-3 py-6 text-5xl font-bold text-right"
               placeholder="0"
               autoFocus
             />
-            <div className="text-2xl font-semibold w-16 text-center">
+            <div className="text-3xl font-bold text-blue-800 w-20 text-center">
               {inputUnit ?? selected.unit}
             </div>
           </div>
           {inputUnit && inputUnit !== selected.unit && qtyInput && (
-            <div className="text-xs text-gray-500 text-right">
+            <div className="text-sm text-gray-700 text-right">
               保存：
               {convertToItemUnit(
                 Number(qtyInput) || 0,
                 inputUnit,
                 selected.unit,
-              ).toFixed(selected.is_weight ? 2 : 0)}
+              ).toFixed(selected.unit === "kg" ? 3 : selected.is_weight ? 2 : 0).replace(/\.?0+$/, "")}
               {selected.unit}
             </div>
           )}

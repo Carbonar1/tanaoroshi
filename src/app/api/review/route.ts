@@ -16,7 +16,8 @@ type Body = {
   findings: FindingIn[];
 };
 
-const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+const DEFAULT_MODEL = "claude-haiku-4-5";
+const TIMEOUT_MS = 25_000;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -33,7 +34,12 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: "不正なJSON" }, { status: 400 });
   }
-  if (!body?.findings?.length) {
+  // 未入力（info）はクライアント側でまとめて表示するため送らない
+  // 要確認・確認のみを最大 10 件に絞る
+  const findings = (body?.findings ?? [])
+    .filter((f) => !f.id.startsWith("miss-"))
+    .slice(0, 10);
+  if (findings.length === 0) {
     return NextResponse.json({ notes: [] });
   }
 
@@ -44,9 +50,21 @@ export async function POST(req: NextRequest) {
 機械的な事実の繰り返しではなく、kg/g の取り違え・小数点の位置・桁の多さ・2人での重複カウントなど、具体的な原因候補を挙げてください。
 返事は必ず次のJSON形式のみ：{"notes":[{"id":"<findingのid>","note":"<1〜2文>"}, ...]}`;
 
+  const compact = findings.map((f) => ({
+    id: f.id,
+    item: f.item,
+    unit: f.unit,
+    current: f.current_qty,
+    last: f.last_month_qty,
+    reason: f.reason,
+  }));
+
   const user = `棚卸し月: ${body.month}
-以下の指摘にそれぞれコメントしてください。
-${JSON.stringify(body.findings, null, 2)}`;
+指摘：${JSON.stringify(compact)}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const started = Date.now();
 
   let aiRes: Response;
   try {
@@ -63,24 +81,47 @@ ${JSON.stringify(body.findings, null, 2)}`;
         system,
         messages: [{ role: "user", content: user }],
       }),
+      signal: controller.signal,
     });
   } catch (e) {
+    clearTimeout(timer);
+    const dur = Date.now() - started;
+    const msg =
+      e instanceof Error
+        ? e.name === "AbortError"
+          ? `Claude 応答がタイムアウトしました（${TIMEOUT_MS / 1000}秒）`
+          : e.message
+        : "fetch 失敗";
+    console.error(
+      `[review] model=${model} duration=${dur}ms fetchError=${msg}`,
+    );
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "fetch 失敗" },
+      { error: msg, model, duration_ms: dur },
       { status: 502 },
     );
   }
+  clearTimeout(timer);
+  const dur = Date.now() - started;
 
   if (!aiRes.ok) {
     const text = await aiRes.text();
+    console.error(
+      `[review] model=${model} status=${aiRes.status} duration=${dur}ms body=${text.slice(0, 500)}`,
+    );
     return NextResponse.json(
-      { error: `Anthropic API ${aiRes.status}: ${text.slice(0, 300)}` },
+      {
+        error: `Anthropic API ${aiRes.status}`,
+        details: text.slice(0, 300),
+        model,
+        duration_ms: dur,
+      },
       { status: 502 },
     );
   }
 
   const data = (await aiRes.json()) as {
     content?: { type: string; text?: string }[];
+    stop_reason?: string;
   };
   const text = (data.content ?? [])
     .filter((c) => c.type === "text")
@@ -89,8 +130,16 @@ ${JSON.stringify(body.findings, null, 2)}`;
 
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) {
+    console.error(
+      `[review] model=${model} duration=${dur}ms no-json stop=${data.stop_reason} raw=${text.slice(0, 400)}`,
+    );
     return NextResponse.json(
-      { error: "モデル応答をJSONとして解釈できませんでした", raw: text },
+      {
+        error: "モデル応答を JSON として読めませんでした。",
+        model,
+        stop_reason: data.stop_reason,
+        raw: text.slice(0, 400),
+      },
       { status: 502 },
     );
   }
@@ -98,10 +147,19 @@ ${JSON.stringify(body.findings, null, 2)}`;
     const parsed = JSON.parse(match[0]) as {
       notes?: { id: string; note: string }[];
     };
-    return NextResponse.json({ notes: parsed.notes ?? [] });
-  } catch {
+    return NextResponse.json({
+      notes: parsed.notes ?? [],
+      model,
+      duration_ms: dur,
+    });
+  } catch (e) {
+    console.error(
+      `[review] model=${model} duration=${dur}ms json-parse-fail ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
     return NextResponse.json(
-      { error: "JSON parse 失敗", raw: text },
+      { error: "JSON parse 失敗", model, raw: text.slice(0, 400) },
       { status: 502 },
     );
   }

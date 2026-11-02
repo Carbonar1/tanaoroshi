@@ -14,6 +14,7 @@ import {
   newClientUid,
   userName,
 } from "@/lib/db";
+import { fmtQtyByUnit } from "@/lib/fmt";
 
 type ItemStat = {
   item: Item;
@@ -218,11 +219,21 @@ export default function ProgressPage() {
                       >
                         {x.item.name}
                       </div>
-                      <div className="text-xs text-gray-500">
-                        順{x.item.sheet_order} / {x.item.unit}
-                        {x.item.last_month_qty != null
-                          ? ` / 先月 ${x.item.last_month_qty}`
-                          : ""}
+                      <div className="text-sm text-gray-700">
+                        単位：<b>{x.item.unit}</b>
+                        {x.item.last_month_qty != null && (
+                          <>
+                            {" "}／ 先月：
+                            <b>
+                              {fmtQtyByUnit(
+                                x.item.last_month_qty,
+                                x.item.unit,
+                                x.item.is_weight,
+                              )}
+                            </b>
+                            {x.item.unit}
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="text-right">
@@ -230,12 +241,12 @@ export default function ProgressPage() {
                         <span className="text-red-600 text-sm">未入力</span>
                       ) : (
                         <span className="text-lg font-semibold">
-                          {x.item.is_weight ? x.qty.toFixed(2) : x.qty}
+                          {fmtQtyByUnit(x.qty, x.item.unit, x.item.is_weight)}
                           <span className="text-sm ml-1">{x.item.unit}</span>
                         </span>
                       )}
-                      <div className="text-xs text-gray-400">
-                        記録 {x.entryCount}
+                      <div className="text-sm text-gray-600">
+                        入力：{x.entryCount}回
                       </div>
                     </div>
                   </summary>
@@ -260,7 +271,7 @@ export default function ProgressPage() {
                             <span>
                               {e.mode === "set" ? "決定" : "足す"}{" "}
                               <b>
-                                {x.item.is_weight ? e.qty.toFixed(2) : e.qty}
+                                {fmtQtyByUnit(e.qty, x.item.unit, x.item.is_weight)}
                                 {x.item.unit}
                               </b>
                             </span>

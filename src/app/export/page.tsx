@@ -12,6 +12,7 @@ import {
   ensureCurrentStocktake,
 } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
+import { fmtQtyByUnit } from "@/lib/fmt";
 
 type Row = {
   item: Item;
@@ -29,8 +30,8 @@ function fmtMoney(n: number): string {
   return "¥" + Math.round(n).toLocaleString("ja-JP");
 }
 
-function fmtQty(q: number, isWeight: 0 | 1): string {
-  return isWeight ? q.toFixed(2) : String(q);
+function fmtQty(q: number, item: Item): string {
+  return fmtQtyByUnit(q, item.unit, item.is_weight);
 }
 
 function csvEscape(s: string): string {
@@ -131,7 +132,7 @@ export default function ExportPage() {
     const lines: string[] = [header.map(csvEscape).join(",")];
     for (const g of groups) {
       for (const r of g.rows) {
-        const q = r.qty == null ? "" : fmtQty(r.qty, r.item.is_weight);
+        const q = r.qty == null ? "" : fmtQty(r.qty, r.item);
         lines.push(
           [
             g.supplierName,
@@ -293,7 +294,7 @@ export default function ExportPage() {
                       <span className="text-red-600">未入力</span>
                     ) : (
                       <>
-                        {fmtQty(r.qty, r.item.is_weight)}
+                        {fmtQty(r.qty, r.item)}
                         <span className="text-xs ml-1 text-gray-500">
                           {r.item.unit}
                         </span>

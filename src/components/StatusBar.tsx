@@ -105,27 +105,31 @@ export default function StatusBar() {
   }
 
   return (
-    <div className="sticky top-0 z-10 bg-white border-b flex items-center justify-between px-3 py-2 text-sm">
-      <div className="flex items-center gap-2">
+    <div className="sticky top-0 z-10 bg-white border-b flex items-center justify-between gap-2 px-3 py-3 text-base">
+      <div className="flex items-center gap-2 flex-wrap">
         <span
-          className={`inline-block w-2.5 h-2.5 rounded-full ${
+          className={`inline-block w-3.5 h-3.5 rounded-full ${
             online ? "bg-emerald-500" : "bg-red-500"
           }`}
         />
-        <span>{online ? "電波あり" : "電波なし"}</span>
-        <span className="text-gray-500">
-          / 未送信 <b>{unsynced ?? 0}</b> 件
+        <span className="font-semibold">
+          {online ? "電波あり" : "電波なし"}
+        </span>
+        <span className="text-gray-700">
+          ／ 未送信 <b>{unsynced ?? 0}</b> 件
         </span>
         {hasSupabase() && (
           <button
             onClick={() => runSync(true)}
             disabled={syncing || !online}
-            className="ml-1 px-2 py-0.5 rounded border text-xs bg-white disabled:text-gray-400"
+            className="ml-1 px-3 py-1.5 rounded-lg border bg-white font-semibold disabled:text-gray-400"
           >
             {syncing ? "送信中..." : "送る"}
           </button>
         )}
-        {syncMsg && <span className="text-xs text-gray-500">{syncMsg}</span>}
+        {syncMsg && (
+          <span className="text-sm text-gray-700 w-full">{syncMsg}</span>
+        )}
       </div>
       <div className="relative">
         {editing ? (
@@ -186,7 +190,10 @@ export default function StatusBar() {
             </button>
           </div>
         ) : (
-          <button onClick={open} className="underline text-blue-700">
+          <button
+            onClick={open}
+            className="underline text-blue-700 font-semibold text-base px-2 py-1"
+          >
             {name || "名前を入れる"}
           </button>
         )}

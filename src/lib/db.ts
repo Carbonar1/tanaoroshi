@@ -139,6 +139,16 @@ class TanaoroshiDB extends Dexie {
       settings: "key",
       label_photos: "++id, stocktake_id, status, taken_at",
     });
+    this.version(5).stores({
+      suppliers: "++id, name, sort_order",
+      items:
+        "++id, name, reading, supplier_id, sheet_order, active, [supplier_id+name]",
+      stocktakes: "++id, month, status",
+      count_entries:
+        "++id, &client_uid, stocktake_id, item_id, counted_at, synced_at, [stocktake_id+item_id]",
+      settings: "key",
+      label_photos: "++id, stocktake_id, status, taken_at",
+    });
   }
 }
 

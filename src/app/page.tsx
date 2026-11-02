@@ -62,13 +62,13 @@ export default function Home() {
           href="/import"
           className="block rounded-lg bg-white border text-center py-4 text-lg shadow-sm"
         >
-          CSV取込
+          ファイルから品目を読み込む
         </Link>
         <Link
           href="/scan"
           className="block rounded-lg bg-white border text-center py-4 text-lg shadow-sm"
         >
-          用紙を撮って登録
+          用紙の写真から品目を読み込む
         </Link>
         <Link
           href="/month"

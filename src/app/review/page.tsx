@@ -129,7 +129,7 @@ export default function ReviewPage() {
     try {
       const payload = {
         month: stocktake.month,
-        findings: visible.slice(0, 20).map((f) => ({
+        findings: nonMissing.slice(0, 10).map((f) => ({
           id: f.id,
           item: f.item.name,
           unit: f.item.unit,
@@ -163,9 +163,11 @@ export default function ReviewPage() {
 
   if (!stocktake) return <div className="p-4">読み込み中...</div>;
 
-  const highN = visible.filter((f) => f.severity === "high").length;
-  const midN = visible.filter((f) => f.severity === "mid").length;
-  const infoN = visible.filter((f) => f.severity === "info").length;
+  const missingVisible = visible.filter((f) => f.id.startsWith("miss-"));
+  const nonMissing = visible.filter((f) => !f.id.startsWith("miss-"));
+  const highN = nonMissing.filter((f) => f.severity === "high").length;
+  const midN = nonMissing.filter((f) => f.severity === "mid").length;
+  const missN = missingVisible.length;
 
   return (
     <main className="p-4 max-w-3xl mx-auto w-full flex flex-col gap-4">
@@ -176,17 +178,19 @@ export default function ReviewPage() {
 
       <div className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">
         <div className="text-sm text-gray-600">{stocktake.month}</div>
-        <div className="text-lg">
-          指摘 <b>{visible.length}</b> 件
-          <span className="text-sm text-gray-500 ml-2">
-            要確認 {highN} / 確認 {midN} / 参考 {infoN}
-          </span>
+        <div className="text-xl">
+          要確認 <b>{highN}</b> ／ 確認 <b>{midN}</b>
+          {missN > 0 && (
+            <span className="text-base text-gray-600 ml-2">
+              ／ 未入力 {missN} 品目
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={runClaudeReview}
-            disabled={!online || aiLoading || visible.length === 0}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg font-semibold disabled:bg-gray-300"
+            disabled={!online || aiLoading || nonMissing.length === 0}
+            className="bg-purple-600 text-white px-4 py-3 rounded-lg text-lg font-semibold disabled:bg-gray-300"
           >
             {aiLoading ? "Claude に確認中..." : "Claude に理由を聞く"}
           </button>
@@ -201,13 +205,30 @@ export default function ReviewPage() {
         </div>
       </div>
 
+      {missN > 0 && (
+        <Link
+          href="/progress"
+          className="bg-sky-50 border border-sky-200 rounded-lg p-4 flex items-center justify-between hover:bg-sky-100"
+        >
+          <div>
+            <div className="text-lg">
+              未入力が <b className="text-sky-800">{missN}</b> 品目あります
+            </div>
+            <div className="text-sm text-gray-600">
+              先月は数のあった品目です。進み具合の画面で「なし（0）」にまとめて入れられます。
+            </div>
+          </div>
+          <span className="text-sky-700 text-xl">→</span>
+        </Link>
+      )}
+
       {visible.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-6 text-center text-gray-600">
           指摘はありません。
         </div>
-      ) : (
+      ) : nonMissing.length === 0 ? null : (
         <ul className="flex flex-col gap-3">
-          {visible.map((f) => (
+          {nonMissing.map((f) => (
             <li
               key={f.id}
               className={`rounded-lg border p-3 flex flex-col gap-2 ${SEV_COLOR[f.severity]}`}
