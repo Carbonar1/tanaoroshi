@@ -1,0 +1,400 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Unit, UNITS, db } from "@/lib/db";
+
+type ScannedItem = {
+  name: string;
+  unit: string;
+  reading: string;
+  last_month_qty: number | null;
+  sheet_order: number;
+};
+
+type ScannedSupplier = {
+  supplier_name: string;
+  items: ScannedItem[];
+};
+
+type DraftItem = {
+  key: string;
+  include: boolean;
+  name: string;
+  unit: Unit;
+  reading: string;
+  last_month_qty: string;
+  sheet_order: number;
+};
+
+type DraftSupplier = {
+  key: string;
+  supplier_name: string;
+  items: DraftItem[];
+};
+
+function toUnit(u: string): Unit {
+  return (UNITS as string[]).includes(u) ? (u as Unit) : "箱";
+}
+
+async function fileToBase64(f: File): Promise<string> {
+  const buf = await f.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+export default function ScanPage() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [drafts, setDrafts] = useState<DraftSupplier[]>([]);
+  const [registering, setRegistering] = useState(false);
+  const [result, setResult] = useState("");
+  const [online, setOnline] = useState(true);
+
+  useEffect(() => {
+    setOnline(navigator.onLine);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => {
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
+  function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const list = Array.from(e.target.files ?? []);
+    setFiles(list);
+    setPreviews(list.map((f) => URL.createObjectURL(f)));
+    setDrafts([]);
+    setError("");
+    setResult("");
+  }
+
+  async function runScan() {
+    if (files.length === 0) return;
+    setLoading(true);
+    setError("");
+    setDrafts([]);
+    try {
+      const images = await Promise.all(
+        files.map(async (f) => ({
+          mimeType: f.type || "image/jpeg",
+          dataBase64: await fileToBase64(f),
+        })),
+      );
+      const res = await fetch("/api/items/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ images }),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`サーバー ${res.status}: ${t.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as { suppliers?: ScannedSupplier[] };
+      const list = data.suppliers ?? [];
+      const d: DraftSupplier[] = list.map((s, si) => ({
+        key: `s-${si}`,
+        supplier_name: s.supplier_name ?? "",
+        items: (s.items ?? []).map((it, ii) => ({
+          key: `s-${si}-i-${ii}`,
+          include: true,
+          name: it.name ?? "",
+          unit: toUnit(it.unit),
+          reading: it.reading ?? "",
+          last_month_qty:
+            it.last_month_qty == null ? "" : String(it.last_month_qty),
+          sheet_order: it.sheet_order ?? ii + 1,
+        })),
+      }));
+      setDrafts(d);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateItem(
+    sKey: string,
+    iKey: string,
+    patch: Partial<DraftItem>,
+  ) {
+    setDrafts((cur) =>
+      cur.map((s) =>
+        s.key !== sKey
+          ? s
+          : {
+              ...s,
+              items: s.items.map((it) =>
+                it.key !== iKey ? it : { ...it, ...patch },
+              ),
+            },
+      ),
+    );
+  }
+
+  function updateSupplier(sKey: string, name: string) {
+    setDrafts((cur) =>
+      cur.map((s) => (s.key !== sKey ? s : { ...s, supplier_name: name })),
+    );
+  }
+
+  async function register() {
+    const chosen = drafts.flatMap((s) =>
+      s.items.filter((it) => it.include && it.name.trim()).map((it) => ({
+        supplier: s.supplier_name.trim(),
+        it,
+      })),
+    );
+    const valid = chosen.filter((x) => x.supplier);
+    if (valid.length === 0) {
+      alert("登録対象がありません。業者名と品名を確認してください。");
+      return;
+    }
+    if (!confirm(`${valid.length} 件を登録します。よろしいですか？`)) return;
+    setRegistering(true);
+    setResult("");
+    try {
+      await db.transaction("rw", db.suppliers, db.items, async () => {
+        const suppliers = await db.suppliers.toArray();
+        const supplierMap = new Map<string, number>();
+        suppliers.forEach((s) => supplierMap.set(s.name, s.id!));
+        let order = suppliers.length;
+        for (const { supplier, it } of valid) {
+          let sid = supplierMap.get(supplier);
+          if (sid == null) {
+            order += 1;
+            sid = await db.suppliers.add({
+              name: supplier,
+              sort_order: order,
+            });
+            supplierMap.set(supplier, sid);
+          }
+          const existing = await db.items
+            .where({ supplier_id: sid, name: it.name })
+            .first();
+          const last = it.last_month_qty
+            ? Number(it.last_month_qty)
+            : undefined;
+          const payload = {
+            name: it.name,
+            reading: it.reading,
+            supplier_id: sid,
+            sheet_order: it.sheet_order,
+            unit: it.unit,
+            is_weight: (it.unit === "kg" || it.unit === "g" ? 1 : 0) as 0 | 1,
+            active: 1 as const,
+            is_provisional: 0 as const,
+            last_month_qty: Number.isFinite(last as number) ? last : undefined,
+          };
+          if (existing) {
+            await db.items.update(existing.id!, payload);
+          } else {
+            await db.items.add(payload);
+          }
+        }
+      });
+      setResult(`${valid.length} 件を登録しました。`);
+      setDrafts([]);
+      setFiles([]);
+      setPreviews([]);
+    } catch (e) {
+      setResult(`エラー：${(e as Error).message}`);
+    } finally {
+      setRegistering(false);
+    }
+  }
+
+  const totalItems = drafts.reduce(
+    (a, s) => a + s.items.filter((i) => i.include).length,
+    0,
+  );
+
+  return (
+    <main className="p-4 max-w-3xl mx-auto w-full flex flex-col gap-4">
+      <Link href="/" className="text-blue-600 underline text-sm">
+        ← ホーム
+      </Link>
+      <h1 className="text-2xl font-bold">用紙の写真から品目をまとめて登録</h1>
+      <p className="text-sm text-gray-700">
+        業者ごとの用紙（手書きあり）を撮って読み込みます。読み取り結果は人が確認してから登録します。
+      </p>
+
+      <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-3">
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={onFiles}
+          className="text-base"
+        />
+        {previews.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto">
+            {previews.map((p, i) => (
+              <img
+                key={i}
+                src={p}
+                alt=""
+                className="h-32 rounded border object-contain"
+              />
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={runScan}
+            disabled={loading || files.length === 0 || !online}
+            className="bg-purple-600 text-white px-4 py-3 rounded-lg font-semibold disabled:bg-gray-300"
+          >
+            {loading ? "Claudeで読み取り中..." : "Claudeで読み取る"}
+          </button>
+          {!online && (
+            <span className="text-sm text-gray-500">
+              電波がないので戻ってから読み取ります
+            </span>
+          )}
+          {error && <span className="text-sm text-red-600">{error}</span>}
+        </div>
+      </section>
+
+      {drafts.length > 0 && (
+        <>
+          <div className="bg-white rounded-lg shadow p-3 flex items-center justify-between">
+            <div>
+              読み取り：業者 <b>{drafts.length}</b> 社・品目{" "}
+              <b>{totalItems}</b> 件
+            </div>
+            <button
+              onClick={register}
+              disabled={registering || totalItems === 0}
+              className="bg-emerald-600 text-white px-4 py-2 rounded font-semibold disabled:bg-gray-300"
+            >
+              {registering ? "登録中..." : "登録する"}
+            </button>
+          </div>
+
+          {drafts.map((s) => (
+            <section
+              key={s.key}
+              className="bg-white rounded-lg shadow p-3 flex flex-col gap-2"
+            >
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-600">業者名</label>
+                <input
+                  value={s.supplier_name}
+                  onChange={(e) => updateSupplier(s.key, e.target.value)}
+                  className="border rounded px-2 py-1 flex-1"
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="text-sm w-full">
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="py-1 pr-1">採用</th>
+                      <th className="py-1 pr-1">順</th>
+                      <th className="py-1 pr-1">品名</th>
+                      <th className="py-1 pr-1">読み</th>
+                      <th className="py-1 pr-1">単位</th>
+                      <th className="py-1 pr-1">先月</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {s.items.map((it) => (
+                      <tr key={it.key} className="border-b">
+                        <td className="py-1 pr-1">
+                          <input
+                            type="checkbox"
+                            checked={it.include}
+                            onChange={(e) =>
+                              updateItem(s.key, it.key, {
+                                include: e.target.checked,
+                              })
+                            }
+                            className="w-5 h-5"
+                          />
+                        </td>
+                        <td className="py-1 pr-1 w-14">
+                          <input
+                            type="number"
+                            value={it.sheet_order}
+                            onChange={(e) =>
+                              updateItem(s.key, it.key, {
+                                sheet_order: Number(e.target.value) || 0,
+                              })
+                            }
+                            className="border rounded px-1 py-0.5 w-14"
+                          />
+                        </td>
+                        <td className="py-1 pr-1">
+                          <input
+                            value={it.name}
+                            onChange={(e) =>
+                              updateItem(s.key, it.key, { name: e.target.value })
+                            }
+                            className="border rounded px-2 py-0.5 w-full"
+                          />
+                        </td>
+                        <td className="py-1 pr-1">
+                          <input
+                            value={it.reading}
+                            onChange={(e) =>
+                              updateItem(s.key, it.key, {
+                                reading: e.target.value,
+                              })
+                            }
+                            className="border rounded px-2 py-0.5 w-full"
+                          />
+                        </td>
+                        <td className="py-1 pr-1">
+                          <select
+                            value={it.unit}
+                            onChange={(e) =>
+                              updateItem(s.key, it.key, {
+                                unit: toUnit(e.target.value),
+                              })
+                            }
+                            className="border rounded px-1 py-0.5"
+                          >
+                            {UNITS.map((u) => (
+                              <option key={u} value={u}>
+                                {u}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-1 pr-1 w-20">
+                          <input
+                            value={it.last_month_qty}
+                            onChange={(e) =>
+                              updateItem(s.key, it.key, {
+                                last_month_qty: e.target.value,
+                              })
+                            }
+                            className="border rounded px-1 py-0.5 w-20"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))}
+        </>
+      )}
+
+      {result && (
+        <div className="bg-emerald-50 text-emerald-800 rounded p-3 text-sm">
+          {result}
+        </div>
+      )}
+    </main>
+  );
+}

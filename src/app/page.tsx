@@ -56,6 +56,12 @@ export default function Home() {
           CSV取込
         </Link>
         <Link
+          href="/scan"
+          className="block rounded-lg bg-white border text-center py-4 text-lg shadow-sm"
+        >
+          用紙を撮って登録
+        </Link>
+        <Link
           href="/settings"
           className="block rounded-lg bg-white border text-center py-4 text-lg shadow-sm"
         >
