@@ -60,6 +60,7 @@ export interface Stocktake {
 
 export interface CountEntry {
   id?: number;
+  client_uid: string;
   stocktake_id: number;
   item_id: number;
   qty: number;
@@ -96,7 +97,30 @@ class TanaoroshiDB extends Dexie {
         "++id, stocktake_id, item_id, counted_at, synced_at, [stocktake_id+item_id]",
       settings: "key",
     });
+    this.version(3)
+      .stores({
+        suppliers: "++id, name, sort_order",
+        items: "++id, name, reading, supplier_id, sheet_order, active",
+        stocktakes: "++id, month, status",
+        count_entries:
+          "++id, &client_uid, stocktake_id, item_id, counted_at, synced_at, [stocktake_id+item_id]",
+        settings: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table("count_entries")
+          .toCollection()
+          .modify((e: CountEntry) => {
+            if (!e.client_uid) {
+              e.client_uid = `${e.device_id || "x"}-${e.counted_at}-${Math.random().toString(36).slice(2, 8)}`;
+            }
+          });
+      });
   }
+}
+
+export function newClientUid(deviceId: string): string {
+  return `${deviceId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export const db = new TanaoroshiDB();

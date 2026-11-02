@@ -11,6 +11,7 @@ import {
   db,
   deviceId,
   ensureCurrentStocktake,
+  newClientUid,
   userName,
 } from "@/lib/db";
 
@@ -83,14 +84,16 @@ export default function ProgressPage() {
     )
       return;
     const now = Date.now();
+    const dev = deviceId();
     await db.count_entries.bulkAdd(
       missing.map((x) => ({
+        client_uid: newClientUid(dev),
         stocktake_id: stocktake.id!,
         item_id: x.item.id!,
         qty: 0,
         mode: "set" as const,
         counted_by: userName() || "未設定",
-        device_id: deviceId(),
+        device_id: dev,
         counted_at: now,
       })),
     );
@@ -108,14 +111,16 @@ export default function ProgressPage() {
     if (!confirm(`未入力の ${missing.length} 品目を全部「なし（0）」にします。`))
       return;
     const now = Date.now();
+    const dev = deviceId();
     await db.count_entries.bulkAdd(
       missing.map((it) => ({
+        client_uid: newClientUid(dev),
         stocktake_id: stocktake.id!,
         item_id: it.id!,
         qty: 0,
         mode: "set" as const,
         counted_by: userName() || "未設定",
-        device_id: deviceId(),
+        device_id: dev,
         counted_at: now,
       })),
     );

@@ -1,8 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, getMembers, setUserName, userName } from "@/lib/db";
+import {
+  db,
+  ensureCurrentStocktake,
+  getMembers,
+  setUserName,
+  userName,
+} from "@/lib/db";
+import { hasSupabase } from "@/lib/supabase";
+import { syncNow } from "@/lib/sync";
 
 export default function StatusBar() {
   const [online, setOnline] = useState(true);
@@ -14,6 +22,39 @@ export default function StatusBar() {
   const unsynced = useLiveQuery(() =>
     db.count_entries.filter((e) => !e.synced_at).count(),
   );
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+  const autoFiredRef = useRef(false);
+
+  async function runSync(manual: boolean) {
+    if (!hasSupabase()) {
+      if (manual) setSyncMsg("Supabase 未設定");
+      return;
+    }
+    if (!navigator.onLine) {
+      if (manual) setSyncMsg("電波なし");
+      return;
+    }
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMsg("送信中...");
+    try {
+      const st = await ensureCurrentStocktake();
+      const r = await syncNow(st);
+      if (r.errors.length > 0) {
+        setSyncMsg(`エラー：${r.errors[0]}`);
+      } else {
+        setSyncMsg(
+          `送信${r.pushedEntries}・受信${r.pulledEntries}・品目${r.pulledItems + r.pushedItems}`,
+        );
+      }
+    } catch (e) {
+      setSyncMsg(`エラー：${(e as Error).message}`);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(""), 4000);
+    }
+  }
 
   async function reloadMembers() {
     const m = await getMembers();
@@ -26,7 +67,14 @@ export default function StatusBar() {
     setName(current);
     reloadMembers();
     if (!current) setEditing(true);
-    const on = () => setOnline(true);
+    if (navigator.onLine && hasSupabase() && !autoFiredRef.current) {
+      autoFiredRef.current = true;
+      runSync(false);
+    }
+    const on = () => {
+      setOnline(true);
+      if (hasSupabase()) runSync(false);
+    };
     const off = () => setOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
@@ -67,6 +115,16 @@ export default function StatusBar() {
         <span className="text-gray-500">
           / 未送信 <b>{unsynced ?? 0}</b> 件
         </span>
+        {hasSupabase() && (
+          <button
+            onClick={() => runSync(true)}
+            disabled={syncing || !online}
+            className="ml-1 px-2 py-0.5 rounded border text-xs bg-white disabled:text-gray-400"
+          >
+            {syncing ? "送信中..." : "送る"}
+          </button>
+        )}
+        {syncMsg && <span className="text-xs text-gray-500">{syncMsg}</span>}
       </div>
       <div className="relative">
         {editing ? (

@@ -12,6 +12,7 @@ import {
   db,
   deviceId,
   ensureCurrentStocktake,
+  newClientUid,
   userName,
 } from "@/lib/db";
 import { normalize } from "@/lib/search";
@@ -112,13 +113,15 @@ export default function CountPage() {
       return;
     }
     const q = convertToItemUnit(raw, useUnit, selected.unit);
+    const dev = deviceId();
     const entry: Omit<CountEntry, "id"> = {
+      client_uid: newClientUid(dev),
       stocktake_id: stocktake.id!,
       item_id: selected.id!,
       qty: q,
       mode,
       counted_by: userName() || "未設定",
-      device_id: deviceId(),
+      device_id: dev,
       counted_at: Date.now(),
     };
     await db.count_entries.add(entry);
