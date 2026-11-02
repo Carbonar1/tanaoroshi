@@ -19,6 +19,7 @@ import {
 } from "./supabase";
 import { humanize } from "./humanError";
 import { mergeItems, mergeSuppliers } from "./syncMerge";
+import { dedupePayload, pickKeeperMap } from "./dedupe";
 
 export type SyncResult = {
   pulledSuppliers: number;
@@ -54,10 +55,13 @@ async function syncSuppliers(result: SyncResult): Promise<Map<number, number>> {
 
   // 1. ローカルの発注先をまとめて upsert（名前で突き合わせ）
   if (locals.length > 0) {
-    const payload = locals.map((l) => ({
-      name: l.name,
-      sort_order: l.sort_order,
-    }));
+    const payload = dedupePayload(
+      locals.map((l) => ({
+        name: l.name,
+        sort_order: l.sort_order,
+      })),
+      ["name"],
+    );
     const { data, error } = await sb
       .from("suppliers")
       .upsert(payload, { onConflict: "name" })
@@ -139,12 +143,13 @@ async function syncItems(
   }
 
   if (payload.length > 0) {
+    const deduped = dedupePayload(
+      payload.map((p) => p.row as Record<string, unknown>),
+      ["supplier_id", "name"],
+    );
     const { data, error } = await sb
       .from("items")
-      .upsert(
-        payload.map((p) => p.row),
-        { onConflict: "supplier_id,name" },
-      )
+      .upsert(deduped, { onConflict: "supplier_id,name" })
       .select("id, supplier_id, name");
     if (error) {
       result.errors.push(`品目の送信：${humanize(error.message)}`);
@@ -364,6 +369,65 @@ async function pullEntries(
   }
 }
 
+// ローカル DB の重複行をまとめる。
+// - 発注先：同名が複数 → id の小さい方を残し、品目の supplier_id をそちらへ付け替え、重複行を削除
+// - 品目：同じ (supplier_id, name) が複数 → id の小さい方を残し、入力記録の item_id を付け替え、重複行を削除
+export async function dedupeLocalDb(): Promise<{
+  mergedSuppliers: number;
+  mergedItems: number;
+}> {
+  let mergedSuppliers = 0;
+  let mergedItems = 0;
+
+  await db.transaction(
+    "rw",
+    db.suppliers,
+    db.items,
+    db.count_entries,
+    async () => {
+      // 発注先
+      const suppliers = await db.suppliers.toArray();
+      const { remap: supRemap } = pickKeeperMap(
+        suppliers.map((s) => ({ id: s.id!, name: s.name, sort_order: s.sort_order })),
+        (r) => r.name,
+      );
+      if (supRemap.size > 0) {
+        for (const [removed, keeper] of supRemap) {
+          await db.items
+            .where("supplier_id")
+            .equals(removed)
+            .modify({ supplier_id: keeper });
+        }
+        await db.suppliers.bulkDelete([...supRemap.keys()]);
+        mergedSuppliers = supRemap.size;
+      }
+
+      // 品目
+      const items = await db.items.toArray();
+      const { remap: itemRemap } = pickKeeperMap(
+        items.map((it) => ({
+          id: it.id!,
+          supplier_id: it.supplier_id,
+          name: it.name,
+        })),
+        (r) => `${r.supplier_id}:${r.name}`,
+      );
+      if (itemRemap.size > 0) {
+        for (const [removed, keeper] of itemRemap) {
+          await db.count_entries
+            .where("item_id")
+            .equals(removed)
+            .modify({ item_id: keeper });
+        }
+        await db.items.bulkDelete([...itemRemap.keys()]);
+        mergedItems = itemRemap.size;
+      }
+    },
+  );
+
+  return { mergedSuppliers, mergedItems };
+}
+
 let syncing = false;
 
 export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
@@ -382,6 +446,11 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
   }
   syncing = true;
   try {
+    try {
+      await dedupeLocalDb();
+    } catch (e) {
+      result.errors.push(`重複の整理：${humanize(e)}`);
+    }
     const supplierMap = await syncSuppliers(result);
     const itemMap = await syncItems(supplierMap, result);
     const serverStocktakeId = await syncStocktake(stocktake);

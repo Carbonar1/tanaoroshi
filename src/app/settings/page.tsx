@@ -19,6 +19,7 @@ import {
 import { DEMO_ITEMS } from "@/lib/demoData";
 import { Dialog, useDialog } from "@/components/Dialog";
 import { humanize } from "@/lib/humanError";
+import { dedupeLocalDb } from "@/lib/sync";
 
 export default function SettingsPage() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null);
@@ -711,6 +712,32 @@ export default function SettingsPage() {
             </button>
           </div>
         ))}
+      </section>
+
+      <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">
+        <h2 className="text-lg font-semibold">重複をまとめる</h2>
+        <div className="text-sm text-gray-600">
+          同じ名前の発注先や、同じ発注先＋同じ品名の品目が複数あるときに、1 つにまとめます。入力記録は残る側へ付け替えます。
+        </div>
+        <button
+          onClick={() =>
+            dlg.confirm({
+              title: "重複をまとめますか？",
+              body: "元には戻せません。入力記録は失われません。",
+              tone: "warn",
+              confirmLabel: "まとめる",
+              cancelLabel: "やめる",
+              success: { title: "まとめました" },
+              onConfirm: async (): Promise<string> => {
+                const r = await dedupeLocalDb();
+                return `発注先 ${r.mergedSuppliers} 件、品目 ${r.mergedItems} 件をまとめました。`;
+              },
+            })
+          }
+          className="bg-amber-500 text-white rounded py-3 text-base font-semibold"
+        >
+          発注先・品目の重複をまとめる
+        </button>
       </section>
 
       <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">
