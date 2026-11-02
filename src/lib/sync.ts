@@ -8,7 +8,6 @@ import {
   Unit,
   UNITS,
   db,
-  newClientUid,
 } from "./db";
 import {
   RemoteEntry,
@@ -18,6 +17,8 @@ import {
   hasSupabase,
   supabase,
 } from "./supabase";
+import { humanize } from "./humanError";
+import { mergeItems, mergeSuppliers } from "./syncMerge";
 
 export type SyncResult = {
   pulledSuppliers: number;
@@ -43,110 +44,149 @@ function toUnit(u: string): Unit {
   return (UNITS as string[]).includes(u) ? (u as Unit) : "箱";
 }
 
-// 発注先：ローカル → サーバー（名前で突き合わせ、無ければ作成）
-// サーバー → ローカル（名前で突き合わせ、無ければ作成）
+// 発注先：同名はサーバーの既存行を使う（upsert onConflict=name）
 async function syncSuppliers(result: SyncResult): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
   const sb = supabase();
-  const localToServer = new Map<number, number>();
-  if (!sb) return localToServer;
-
-  const { data: remote, error } = await sb
-    .from("suppliers")
-    .select("id,name,sort_order")
-    .order("sort_order");
-  if (error) {
-    result.errors.push(`発注先の取得: ${error.message}`);
-    return localToServer;
-  }
-  const remoteByName = new Map<string, RemoteSupplier>();
-  (remote ?? []).forEach((r) =>
-    remoteByName.set(r.name, r as RemoteSupplier),
-  );
+  if (!sb) return map;
 
   const locals = await db.suppliers.toArray();
+
+  // 1. ローカルの発注先をまとめて upsert（名前で突き合わせ）
+  if (locals.length > 0) {
+    const payload = locals.map((l) => ({
+      name: l.name,
+      sort_order: l.sort_order,
+    }));
+    const { data, error } = await sb
+      .from("suppliers")
+      .upsert(payload, { onConflict: "name" })
+      .select("id, name, sort_order");
+    if (error) {
+      result.errors.push(`発注先の送信：${humanize(error.message)}`);
+    } else {
+      const map1 = mergeSuppliers(
+        locals.map((l) => ({ id: l.id!, name: l.name })),
+        (data ?? []) as Array<{ id: number; name: string }>,
+      );
+      map1.forEach((srv, loc) => map.set(loc, srv));
+      result.pushedSuppliers += data?.length ?? 0;
+    }
+  }
+
+  // 2. サーバーの発注先を取得して、ローカルに無いものを追加
+  const { data: remote, error } = await sb
+    .from("suppliers")
+    .select("id, name, sort_order")
+    .order("sort_order");
+  if (error) {
+    result.errors.push(`発注先の取得：${humanize(error.message)}`);
+    return map;
+  }
   const localByName = new Map<string, Supplier>();
   locals.forEach((l) => localByName.set(l.name, l));
-
-  // サーバーのみに存在するもの → ローカルに作成
-  for (const r of remoteByName.values()) {
-    if (!localByName.has(r.name)) {
+  for (const r of (remote ?? []) as RemoteSupplier[]) {
+    const l = localByName.get(r.name);
+    if (l) {
+      map.set(l.id!, r.id);
+    } else {
       const id = await db.suppliers.add({
         name: r.name,
         sort_order: r.sort_order,
       });
-      localToServer.set(id, r.id);
+      map.set(id, r.id);
       result.pulledSuppliers += 1;
-    } else {
-      const l = localByName.get(r.name)!;
-      localToServer.set(l.id!, r.id);
     }
   }
-
-  // ローカルのみ → サーバーに作成
-  const localOnly = locals.filter((l) => !remoteByName.has(l.name));
-  if (localOnly.length > 0) {
-    const payload = localOnly.map((l) => ({
-      name: l.name,
-      sort_order: l.sort_order,
-    }));
-    const { data: inserted, error: insErr } = await sb
-      .from("suppliers")
-      .insert(payload)
-      .select("id,name,sort_order");
-    if (insErr) {
-      result.errors.push(`発注先の送信: ${insErr.message}`);
-    } else {
-      (inserted ?? []).forEach((r) => {
-        const local = locals.find((l) => l.name === r.name);
-        if (local) localToServer.set(local.id!, r.id);
-      });
-      result.pushedSuppliers += inserted?.length ?? 0;
-    }
-  }
-
-  return localToServer;
+  return map;
 }
 
-// 品目：発注先IDの対応表を使って双方向同期
+// 品目：同じ発注先＋同じ品名はサーバーの既存行を使う（upsert onConflict=supplier_id,name）
 async function syncItems(
   supplierMap: Map<number, number>,
   result: SyncResult,
 ): Promise<Map<number, number>> {
+  const itemMap = new Map<number, number>();
   const sb = supabase();
-  const itemLocalToServer = new Map<number, number>();
-  if (!sb) return itemLocalToServer;
-
-  const serverSupplierToLocal = new Map<number, number>();
-  supplierMap.forEach((srv, loc) => serverSupplierToLocal.set(srv, loc));
-
-  const { data: remote, error } = await sb.from("items").select("*");
-  if (error) {
-    result.errors.push(`品目の取得: ${error.message}`);
-    return itemLocalToServer;
-  }
-
-  const key = (supplierId: number, name: string) => `${supplierId}:${name}`;
-
-  const remoteByKey = new Map<string, RemoteItem>();
-  (remote ?? []).forEach((r) => {
-    const localSupId = serverSupplierToLocal.get(r.supplier_id);
-    if (localSupId != null) {
-      remoteByKey.set(key(localSupId, r.name), r as RemoteItem);
-    }
-  });
+  if (!sb) return itemMap;
 
   const locals = await db.items.toArray();
-  const localByKey = new Map<string, Item>();
-  locals.forEach((l) => localByKey.set(key(l.supplier_id, l.name), l));
 
-  // サーバー → ローカル
-  for (const [k, r] of remoteByKey) {
-    const localSupId = serverSupplierToLocal.get(r.supplier_id)!;
-    const existing = localByKey.get(k);
-    const payload: Omit<Item, "id"> = {
+  // 1. 送信対象（発注先 id が解決できるものだけ）
+  type P = { local_id: number; row: Record<string, unknown>; name: string };
+  const payload: P[] = [];
+  for (const l of locals) {
+    const srvSid = supplierMap.get(l.supplier_id);
+    if (srvSid == null) continue;
+    payload.push({
+      local_id: l.id!,
+      name: l.name,
+      row: {
+        name: l.name,
+        reading: l.reading ?? "",
+        supplier_id: srvSid,
+        sheet_order: l.sheet_order,
+        spec: l.spec ?? null,
+        unit: l.unit,
+        is_weight: l.is_weight === 1,
+        pack_qty: l.pack_qty ?? null,
+        unit_price: l.unit_price ?? null,
+        active: l.active === 1,
+        is_provisional: l.is_provisional === 1,
+        last_month_qty: l.last_month_qty ?? null,
+      },
+    });
+  }
+
+  if (payload.length > 0) {
+    const { data, error } = await sb
+      .from("items")
+      .upsert(
+        payload.map((p) => p.row),
+        { onConflict: "supplier_id,name" },
+      )
+      .select("id, supplier_id, name");
+    if (error) {
+      result.errors.push(`品目の送信：${humanize(error.message)}`);
+    } else {
+      const byKey = new Map<string, number>();
+      (data ?? []).forEach((r) =>
+        byKey.set(
+          `${(r as { supplier_id: number }).supplier_id}:${(r as { name: string }).name}`,
+          (r as { id: number }).id,
+        ),
+      );
+      for (const p of payload) {
+        const sid = (p.row as { supplier_id: number }).supplier_id;
+        const srvId = byKey.get(`${sid}:${p.name}`);
+        if (srvId != null) itemMap.set(p.local_id, srvId);
+      }
+      result.pushedItems += data?.length ?? 0;
+    }
+  }
+
+  // 2. サーバーから取得して、ローカルを更新・追加
+  const { data: remote, error: fetchErr } = await sb.from("items").select("*");
+  if (fetchErr) {
+    result.errors.push(`品目の取得：${humanize(fetchErr.message)}`);
+    return itemMap;
+  }
+  const serverSupToLocal = new Map<number, number>();
+  supplierMap.forEach((srv, loc) => serverSupToLocal.set(srv, loc));
+  const existingByKey = new Map<string, Item>();
+  locals.forEach((l) =>
+    existingByKey.set(`${l.supplier_id}:${l.name}`, l),
+  );
+
+  for (const r of (remote ?? []) as RemoteItem[]) {
+    const localSup = serverSupToLocal.get(r.supplier_id);
+    if (localSup == null) continue;
+    const key = `${localSup}:${r.name}`;
+    const existing = existingByKey.get(key);
+    const payloadLocal: Omit<Item, "id"> = {
       name: r.name,
       reading: r.reading ?? "",
-      supplier_id: localSupId,
+      supplier_id: localSup,
       sheet_order: r.sheet_order,
       spec: r.spec ?? undefined,
       unit: toUnit(r.unit),
@@ -158,88 +198,68 @@ async function syncItems(
       last_month_qty: r.last_month_qty ?? undefined,
     };
     if (existing) {
-      await db.items.update(existing.id!, payload);
-      itemLocalToServer.set(existing.id!, r.id);
+      await db.items.update(existing.id!, payloadLocal);
+      itemMap.set(existing.id!, r.id);
     } else {
-      const id = await db.items.add(payload);
-      itemLocalToServer.set(id, r.id);
+      const id = await db.items.add(payloadLocal);
+      itemMap.set(id, r.id);
       result.pulledItems += 1;
     }
   }
 
-  // ローカルのみ → サーバー
-  const localOnly = locals.filter(
-    (l) => !remoteByKey.has(key(l.supplier_id, l.name)),
-  );
-  if (localOnly.length > 0) {
-    const payload = localOnly
-      .map((l) => {
-        const srvSup = supplierMap.get(l.supplier_id);
-        if (srvSup == null) return null;
-        return {
-          name: l.name,
-          reading: l.reading ?? "",
-          supplier_id: srvSup,
-          sheet_order: l.sheet_order,
-          spec: l.spec ?? null,
-          unit: l.unit,
-          is_weight: l.is_weight === 1,
-          pack_qty: l.pack_qty ?? null,
-          unit_price: l.unit_price ?? null,
-          active: l.active === 1,
-          is_provisional: l.is_provisional === 1,
-          last_month_qty: l.last_month_qty ?? null,
-          _local_id: l.id!,
-        };
-      })
-      .filter(Boolean) as Array<Record<string, unknown> & { _local_id: number }>;
-
-    const { data: inserted, error: insErr } = await sb
-      .from("items")
-      .insert(payload.map(({ _local_id, ...rest }) => rest))
-      .select("id,name,supplier_id");
-    if (insErr) {
-      result.errors.push(`品目の送信: ${insErr.message}`);
-    } else {
-      (inserted ?? []).forEach((r) => {
-        const match = payload.find(
-          (p) => p.name === r.name && p.supplier_id === r.supplier_id,
-        );
-        if (match) itemLocalToServer.set(match._local_id, r.id);
-      });
-      result.pushedItems += inserted?.length ?? 0;
-    }
+  // 3. 念のため、サーバーに存在する行をローカル→サーバー対応表に合流
+  const remoteByKey = new Map<string, number>();
+  (remote ?? []).forEach((r) => {
+    const ls = serverSupToLocal.get(r.supplier_id);
+    if (ls != null) remoteByKey.set(`${ls}:${r.name}`, r.id);
+  });
+  for (const l of locals) {
+    if (itemMap.has(l.id!)) continue;
+    const srv = remoteByKey.get(`${l.supplier_id}:${l.name}`);
+    if (srv != null) itemMap.set(l.id!, srv);
   }
+  const map2 = mergeItems(
+    locals.map((l) => ({
+      id: l.id!,
+      supplier_id: l.supplier_id,
+      name: l.name,
+    })),
+    (remote ?? []).map((r) => ({
+      id: r.id,
+      supplier_id: r.supplier_id,
+      name: r.name,
+    })),
+    supplierMap,
+  );
+  map2.forEach((srv, loc) => {
+    if (!itemMap.has(loc)) itemMap.set(loc, srv);
+  });
 
-  return itemLocalToServer;
+  return itemMap;
 }
 
-async function syncStocktake(
-  localStock: Stocktake,
-): Promise<number | null> {
+async function syncStocktake(localStock: Stocktake): Promise<number | null> {
   const sb = supabase();
   if (!sb) return null;
-  const { data: existing, error } = await sb
+  const { data, error } = await sb
     .from("stocktakes")
-    .select("*")
-    .eq("month", localStock.month)
-    .maybeSingle();
-  if (error) return null;
-  if (existing) return (existing as RemoteStocktake).id;
-  const { data: inserted, error: insErr } = await sb
-    .from("stocktakes")
-    .insert({
-      month: localStock.month,
-      status: localStock.status,
-      tax_mode: localStock.tax_mode,
-      tax_rate: localStock.tax_rate,
-    })
+    .upsert(
+      {
+        month: localStock.month,
+        status: localStock.status,
+        tax_mode: localStock.tax_mode,
+        tax_rate: localStock.tax_rate,
+      },
+      { onConflict: "month" },
+    )
     .select("id")
     .single();
-  if (insErr) return null;
-  return inserted.id as number;
+  if (error) return null;
+  return (data as RemoteStocktake).id;
 }
 
+// 入力の記録：1 件ずつ upsert（client_uid で二重登録を防止）
+// 1 件失敗しても他は送る。失敗した行は synced_at を立てないので次回自動で再送される。
 async function pushEntries(
   stocktake: Stocktake,
   serverStocktakeId: number,
@@ -255,49 +275,29 @@ async function pushEntries(
     .toArray();
   if (unsynced.length === 0) return;
 
-  const payload = unsynced
-    .map((e) => {
-      const serverItemId = itemMap.get(e.item_id);
-      if (serverItemId == null) return null;
-      return {
-        local_id: e.id!,
-        row: {
-          client_uid: e.client_uid,
-          stocktake_id: serverStocktakeId,
-          item_id: serverItemId,
-          qty: e.qty,
-          mode: e.mode,
-          counted_by: e.counted_by ?? "",
-          device_id: e.device_id ?? "",
-          counted_at: new Date(e.counted_at).toISOString(),
-        },
-      };
-    })
-    .filter(Boolean) as Array<{
-    local_id: number;
-    row: Record<string, unknown>;
-  }>;
-
-  if (payload.length === 0) return;
-
-  const { error } = await sb
-    .from("count_entries")
-    .upsert(
-      payload.map((p) => p.row),
-      { onConflict: "client_uid", ignoreDuplicates: true },
-    );
-  if (error) {
-    result.errors.push(`入力記録の送信: ${error.message}`);
-    return;
+  for (const e of unsynced) {
+    const serverItemId = itemMap.get(e.item_id);
+    if (serverItemId == null) continue; // 品目の送信失敗。次回。
+    const row = {
+      client_uid: e.client_uid,
+      stocktake_id: serverStocktakeId,
+      item_id: serverItemId,
+      qty: e.qty,
+      mode: e.mode,
+      counted_by: e.counted_by ?? "",
+      device_id: e.device_id ?? "",
+      counted_at: new Date(e.counted_at).toISOString(),
+    };
+    const { error } = await sb
+      .from("count_entries")
+      .upsert(row, { onConflict: "client_uid", ignoreDuplicates: true });
+    if (error) {
+      result.errors.push(`入力の送信：${humanize(error.message)}`);
+      continue;
+    }
+    await db.count_entries.update(e.id!, { synced_at: Date.now() });
+    result.pushedEntries += 1;
   }
-
-  const now = Date.now();
-  await Promise.all(
-    payload.map((p) =>
-      db.count_entries.update(p.local_id, { synced_at: now }),
-    ),
-  );
-  result.pushedEntries += payload.length;
 }
 
 async function pullEntries(
@@ -316,7 +316,7 @@ async function pullEntries(
     .select("*")
     .eq("stocktake_id", serverStocktakeId);
   if (error) {
-    result.errors.push(`入力記録の取得: ${error.message}`);
+    result.errors.push(`入力の取得：${humanize(error.message)}`);
     return;
   }
   const remotes = (data ?? []) as RemoteEntry[];
@@ -347,8 +347,20 @@ async function pullEntries(
     });
   }
   if (toInsert.length > 0) {
-    await db.count_entries.bulkAdd(toInsert);
-    result.pulledEntries += toInsert.length;
+    try {
+      await db.count_entries.bulkAdd(toInsert);
+      result.pulledEntries += toInsert.length;
+    } catch {
+      // 競合（client_uid の重複）があった場合は 1 件ずつ入れ直す
+      for (const r of toInsert) {
+        try {
+          await db.count_entries.add(r);
+          result.pulledEntries += 1;
+        } catch {
+          // 既にある。無視。
+        }
+      }
+    }
   }
 }
 
@@ -379,9 +391,10 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     } else {
       result.errors.push("棚卸しの登録に失敗しました。");
     }
+  } catch (e) {
+    result.errors.push(humanize(e));
   } finally {
     syncing = false;
   }
   return result;
 }
-

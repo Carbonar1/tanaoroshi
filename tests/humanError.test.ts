@@ -24,4 +24,28 @@ describe("humanize", () => {
   it("空文字は既定文", () => {
     expect(humanize("")).toMatch(/もう一度/);
   });
+  it("duplicate key を日本語に", () => {
+    expect(
+      humanize(
+        new Error(
+          'duplicate key value violates unique constraint "suppliers_name_key"',
+        ),
+      ),
+    ).toMatch(/同じ名前/);
+  });
+  it("foreign key violation を日本語に", () => {
+    expect(humanize(new Error("violates foreign key constraint"))).toMatch(
+      /まだサーバー/,
+    );
+  });
+  it("not-null violation を日本語に", () => {
+    expect(humanize(new Error("violates not-null constraint"))).toMatch(
+      /必要な項目/,
+    );
+  });
+  it("RLS 失敗を日本語に", () => {
+    expect(humanize(new Error("new row violates row-level security"))).toMatch(
+      /許可設定/,
+    );
+  });
 });
