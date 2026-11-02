@@ -22,6 +22,12 @@ export default function Home() {
           入力の進み具合
         </Link>
         <Link
+          href="/review"
+          className="block rounded-lg bg-purple-600 text-white text-center py-5 text-xl font-semibold shadow"
+        >
+          見直し（Claude）
+        </Link>
+        <Link
           href="/export"
           className="block rounded-lg bg-emerald-600 text-white text-center py-5 text-xl font-semibold shadow"
         >
