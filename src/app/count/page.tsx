@@ -17,6 +17,7 @@ import {
 } from "@/lib/db";
 import { normalize } from "@/lib/search";
 import { altUnit, convertToItemUnit } from "@/lib/units";
+import { predictNext } from "@/lib/predict";
 
 function fmtQty(q: number, isWeight: 0 | 1): string {
   return isWeight ? q.toFixed(2) : String(q);
@@ -87,17 +88,14 @@ export default function CountPage() {
     if (!items || !prevMonthOrder || prevMonthOrder.length === 0) return [];
     const enteredNow = new Set<number>();
     recent?.forEach((e) => enteredNow.add(e.item_id));
-    const lastItemId = recent?.[0]?.item_id;
-    const idx = lastItemId ? prevMonthOrder.indexOf(lastItemId) : -1;
-    const start = idx >= 0 ? idx + 1 : 0;
-    const picks: typeof items = [];
-    for (let i = start; i < prevMonthOrder.length && picks.length < 3; i++) {
-      const id = prevMonthOrder[i];
-      if (enteredNow.has(id)) continue;
-      const it = items.find((x) => x.id === id);
-      if (it) picks.push(it);
-    }
-    return picks;
+    const typedItems = items.map((it) => ({ ...it, id: it.id! }));
+    return predictNext(
+      typedItems,
+      prevMonthOrder,
+      enteredNow,
+      recent?.[0]?.item_id,
+      3,
+    );
   }, [items, prevMonthOrder, recent]);
 
   const normIndex = useMemo(() => {
@@ -142,6 +140,10 @@ export default function CountPage() {
   async function saveEntry(mode: "set" | "add", qtyOverride?: number) {
     if (!stocktake || !selected) return;
     const useUnit = inputUnit ?? selected.unit;
+    if (qtyOverride == null && qtyInput.trim() === "") {
+      alert("数量を入れてください。0 のときは「なし」ボタンを使ってください。");
+      return;
+    }
     const raw =
       qtyOverride != null
         ? qtyOverride
