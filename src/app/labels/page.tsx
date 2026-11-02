@@ -305,8 +305,12 @@ export default function LabelsPage() {
                     </div>
                     {matchedItem ? (
                       <div className="text-sm text-emerald-700">
-                        既存の「{matchedItem.name}」と一致（確信：
-                        {parsed.confidence}）
+                        既存の「{matchedItem.name}」と一致（確からしさ：
+                        {parsed.confidence === "high"
+                          ? "高"
+                          : parsed.confidence === "mid"
+                            ? "中"
+                            : "低"}）
                       </div>
                     ) : parsed.draft_item ? (
                       <div className="text-sm text-amber-800">
