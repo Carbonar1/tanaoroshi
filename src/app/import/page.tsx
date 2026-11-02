@@ -87,7 +87,7 @@ export default function ImportPage() {
         setRows(parsed);
       },
       error: (err) => {
-        setResult(`読み込みエラー: ${err.message}`);
+        setResult(`CSV を読めませんでした：${humanize(err)}`);
       },
     });
   }

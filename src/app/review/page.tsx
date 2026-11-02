@@ -145,7 +145,16 @@ export default function ReviewPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error(`サーバー応答 ${res.status}`);
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const j = (await res.json()) as { error?: string; details?: string };
+          detail = j.error ?? j.details ?? "";
+        } catch {
+          // ignore
+        }
+        throw new Error(detail || `サーバー応答 ${res.status}`);
+      }
       const data = (await res.json()) as {
         notes?: { id: string; note: string }[];
       };
