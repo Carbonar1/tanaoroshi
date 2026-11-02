@@ -12,6 +12,7 @@ import {
   ensureCurrentStocktake,
 } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 type ScanResult = {
   id: number;
@@ -54,6 +55,11 @@ export default function LabelsPage() {
   const [online, setOnline] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [msg, setMsg] = useState("");
+  const dlg = useDialog();
+  const [pendingDraft, setPendingDraft] = useState<{
+    label: LabelPhoto;
+    supplier: string;
+  } | null>(null);
 
   useEffect(() => {
     ensureCurrentStocktake().then(setStocktake);
@@ -152,45 +158,72 @@ export default function LabelsPage() {
     }
   }
 
-  async function registerDraft(l: LabelPhoto) {
+  function registerDraft(l: LabelPhoto) {
     if (!l.result_json) return;
     const r = JSON.parse(l.result_json) as ScanResult;
-    const d = r.draft_item;
-    if (!d) return;
-    const supplierName =
-      prompt("業者名を入れてください（既存のものと同じ名前にしてください）") ??
-      "";
-    if (!supplierName.trim()) return;
-    const suppliers = await db.suppliers.toArray();
-    let sup = suppliers.find((s) => s.name === supplierName.trim());
-    if (!sup) {
-      const sid = await db.suppliers.add({
-        name: supplierName.trim(),
-        sort_order: suppliers.length + 1,
-      });
-      sup = (await db.suppliers.get(sid))!;
-    }
-    const sheet_order =
-      (await db.items.where({ supplier_id: sup.id! }).count()) + 1;
-    const itemId = await db.items.add({
-      name: d.name,
-      reading: d.reading,
-      supplier_id: sup.id!,
-      sheet_order,
-      unit: toUnit(d.unit),
-      is_weight: d.unit === "kg" || d.unit === "g" ? 1 : 0,
-      active: 1,
-      is_provisional: 1,
-    });
-    await db.label_photos.update(l.id!, {
-      status: "registered",
-      item_id: itemId,
-    });
+    if (!r.draft_item) return;
+    setPendingDraft({ label: l, supplier: "" });
   }
 
-  async function remove(id: number) {
-    if (!confirm("この写真を消しますか？")) return;
-    await db.label_photos.delete(id);
+  async function confirmRegisterDraft() {
+    if (!pendingDraft) return;
+    const l = pendingDraft.label;
+    const r = JSON.parse(l.result_json!) as ScanResult;
+    const d = r.draft_item!;
+    const name = pendingDraft.supplier.trim();
+    if (!name) {
+      dlg.info("業者名が入っていません", "", "warn");
+      return;
+    }
+    try {
+      const suppliers = await db.suppliers.toArray();
+      let sup = suppliers.find((s) => s.name === name);
+      if (!sup) {
+        const sid = await db.suppliers.add({
+          name,
+          sort_order: suppliers.length + 1,
+        });
+        sup = (await db.suppliers.get(sid))!;
+      }
+      const sheet_order =
+        (await db.items.where({ supplier_id: sup.id! }).count()) + 1;
+      const itemId = await db.items.add({
+        name: d.name,
+        reading: d.reading,
+        supplier_id: sup.id!,
+        sheet_order,
+        unit: toUnit(d.unit),
+        is_weight: d.unit === "kg" || d.unit === "g" ? 1 : 0,
+        active: 1,
+        is_provisional: 1,
+      });
+      await db.label_photos.update(l.id!, {
+        status: "registered",
+        item_id: itemId,
+      });
+      setPendingDraft(null);
+      dlg.info(
+        "登録しました",
+        `「${d.name}」を ${name} に追加しました。`,
+        "success",
+      );
+    } catch (e) {
+      dlg.info("登録できませんでした", humanize(e), "error");
+    }
+  }
+
+  function remove(id: number) {
+    dlg.confirm({
+      title: "この写真を消しますか？",
+      body: "元に戻せません。",
+      tone: "danger",
+      confirmLabel: "消す",
+      cancelLabel: "やめる",
+      success: { title: "消しました" },
+      onConfirm: async () => {
+        await db.label_photos.delete(id);
+      },
+    });
   }
 
   if (!stocktake) return <div className="p-4">読み込み中...</div>;
@@ -308,6 +341,49 @@ export default function LabelsPage() {
           );
         })}
       </div>
+
+      {pendingDraft && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50"
+          role="dialog"
+        >
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 flex flex-col gap-3">
+            <div className="text-lg font-bold">業者名を入れてください</div>
+            <div className="text-sm text-gray-700">
+              既存の業者と同じ名前にすると、その業者の下に品目が増えます。
+            </div>
+            <input
+              value={pendingDraft.supplier}
+              onChange={(e) =>
+                setPendingDraft({ ...pendingDraft, supplier: e.target.value })
+              }
+              placeholder="例：〇〇食品"
+              className="border rounded px-3 py-3 text-lg"
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPendingDraft(null)}
+                className="flex-1 py-3 rounded-lg border bg-white"
+              >
+                やめる
+              </button>
+              <button
+                onClick={confirmRegisterDraft}
+                className="flex-1 py-3 rounded-lg bg-blue-600 text-white font-semibold"
+              >
+                登録する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

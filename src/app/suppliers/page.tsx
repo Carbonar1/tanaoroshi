@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, Supplier } from "@/lib/db";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 export default function SuppliersPage() {
   const suppliers = useLiveQuery(() =>
@@ -37,14 +38,28 @@ export default function SuppliersPage() {
     setSortOrder(s.sort_order);
   }
 
-  async function onDelete(id: number) {
-    if (!confirm("この発注先を削除しますか？（品目は残ります）")) return;
-    await db.suppliers.delete(id);
-    if (editingId === id) {
-      setEditingId(null);
-      setName("");
-      setSortOrder("");
-    }
+  const dlg = useDialog();
+
+  function onDelete(id: number) {
+    const s = suppliers?.find((x) => x.id === id);
+    dlg.confirm({
+      title: "この発注先を消しますか？",
+      body: s
+        ? `「${s.name}」を消します。品目は残ります。`
+        : "品目は残ります。",
+      tone: "danger",
+      confirmLabel: "消す",
+      cancelLabel: "やめる",
+      success: { title: "消しました" },
+      onConfirm: async () => {
+        await db.suppliers.delete(id);
+        if (editingId === id) {
+          setEditingId(null);
+          setName("");
+          setSortOrder("");
+        }
+      },
+    });
   }
 
   return (
@@ -135,6 +150,11 @@ export default function SuppliersPage() {
           </div>
         ))}
       </section>
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

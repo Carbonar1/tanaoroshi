@@ -19,6 +19,7 @@ import { normalize } from "@/lib/search";
 import { altUnit, convertToItemUnit } from "@/lib/units";
 import { predictNext } from "@/lib/predict";
 import { fmtQty as fmtQtyShared, fmtQtyByUnit } from "@/lib/fmt";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 void fmtQtyShared;
 function fmtQty(q: number, isWeight: 0 | 1, unit: Unit): string {
@@ -32,6 +33,7 @@ export default function CountPage() {
   const [qtyInput, setQtyInput] = useState("");
   const [inputUnit, setInputUnit] = useState<Unit | null>(null);
   const [toast, setToast] = useState("");
+  const dlg = useDialog();
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -143,7 +145,11 @@ export default function CountPage() {
     if (!stocktake || !selected) return;
     const useUnit = inputUnit ?? selected.unit;
     if (qtyOverride == null && qtyInput.trim() === "") {
-      alert("数量を入れてください。0 のときは「なし」ボタンを使ってください。");
+      dlg.info(
+        "数量が空です",
+        "0 のときは「なし」ボタンを使ってください。",
+        "warn",
+      );
       return;
     }
     const raw =
@@ -153,7 +159,7 @@ export default function CountPage() {
           ? Number(qtyInput)
           : Math.trunc(Number(qtyInput));
     if (!Number.isFinite(raw) || raw < 0) {
-      alert("数量を正しく入れてください。");
+      dlg.info("数量が正しくありません", "0 以上の数を入れてください。", "warn");
       return;
     }
     const q = convertToItemUnit(raw, useUnit, selected.unit);
@@ -479,6 +485,11 @@ export default function CountPage() {
           {toast}
         </div>
       )}
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

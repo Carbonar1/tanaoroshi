@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Unit, UNITS, db } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 type ScannedItem = {
   name: string;
@@ -53,6 +54,7 @@ export default function ScanPage() {
   const [error, setError] = useState("");
   const [drafts, setDrafts] = useState<DraftSupplier[]>([]);
   const [registering, setRegistering] = useState(false);
+  const dlg = useDialog();
   const [result, setResult] = useState("");
   const [online, setOnline] = useState(true);
 
@@ -164,10 +166,27 @@ export default function ScanPage() {
     );
     const valid = chosen.filter((x) => x.supplier);
     if (valid.length === 0) {
-      alert("登録対象がありません。業者名と品名を確認してください。");
+      dlg.info(
+        "登録できる品目がありません",
+        "業者名と品名が入っているか確認してください。",
+        "warn",
+      );
       return;
     }
-    if (!confirm(`${valid.length} 件を登録します。よろしいですか？`)) return;
+    dlg.confirm({
+      title: `${valid.length} 件を登録しますか？`,
+      body: "既存の品目と同じ名前のものは上書きされます。",
+      tone: "info",
+      confirmLabel: "登録する",
+      cancelLabel: "やめる",
+      success: { title: "登録しました" },
+      onConfirm: () => doRegister(valid),
+    });
+  }
+
+  async function doRegister(
+    valid: Array<{ supplier: string; it: DraftItem }>,
+  ): Promise<string> {
     setRegistering(true);
     setResult("");
     try {
@@ -210,12 +229,11 @@ export default function ScanPage() {
           }
         }
       });
-      setResult(`${valid.length} 件を登録しました。`);
       setDrafts([]);
       setFiles([]);
       setPreviews([]);
-    } catch (e) {
-      setResult(`エラー：${humanize(e)}`);
+      setResult("");
+      return `${valid.length} 件を登録しました。`;
     } finally {
       setRegistering(false);
     }
@@ -404,6 +422,11 @@ export default function ScanPage() {
           {result}
         </div>
       )}
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

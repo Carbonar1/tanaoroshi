@@ -17,6 +17,8 @@ import {
   Unit,
 } from "@/lib/db";
 import { DEMO_ITEMS } from "@/lib/demoData";
+import { Dialog, useDialog } from "@/components/Dialog";
+import { humanize } from "@/lib/humanError";
 
 export default function SettingsPage() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null);
@@ -27,6 +29,7 @@ export default function SettingsPage() {
   const [newMonth, setNewMonth] = useState("");
   const [members, setMembersState] = useState<string[]>([]);
   const [newMember, setNewMember] = useState("");
+  const dlg = useDialog();
 
   const allStocktakes = useLiveQuery(() =>
     db.stocktakes.orderBy("month").reverse().toArray(),
@@ -46,13 +49,17 @@ export default function SettingsPage() {
 
   async function saveTax() {
     if (!stocktake) return;
-    await db.stocktakes.update(stocktake.id!, {
-      tax_mode: taxMode,
-      tax_rate: taxRate,
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-    reload();
+    try {
+      await db.stocktakes.update(stocktake.id!, {
+        tax_mode: taxMode,
+        tax_rate: taxRate,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      reload();
+    } catch (e) {
+      dlg.info("保存できませんでした", humanize(e), "error");
+    }
   }
 
   async function switchStocktake(id: number) {
@@ -63,80 +70,105 @@ export default function SettingsPage() {
   async function addMonth() {
     const m = newMonth.trim();
     if (!/^\d{4}-\d{2}$/.test(m)) {
-      alert("月は YYYY-MM の形で入れてください（例：2026-11）");
+      dlg.info("月の形が違います", "YYYY-MM の形で入れてください（例：2026-11）。", "error");
       return;
     }
-    const s = await createStocktake(m);
-    await setActiveStocktake(s.id!);
-    setNewMonth("");
-    reload();
+    await dlg.run(`${m} を作りました`, async () => {
+      const s = await createStocktake(m);
+      await setActiveStocktake(s.id!);
+      setNewMonth("");
+      reload();
+    });
   }
 
   async function addMember() {
     const n = newMember.trim();
     if (!n) return;
-    const next = Array.from(new Set([...members, n]));
-    await setMembers(next);
-    setMembersState(next);
-    setNewMember("");
+    try {
+      const next = Array.from(new Set([...members, n]));
+      await setMembers(next);
+      setMembersState(next);
+      setNewMember("");
+      dlg.info(`「${n}」を一覧に追加しました`, "", "success");
+    } catch (e) {
+      dlg.info("追加できませんでした", humanize(e), "error");
+    }
   }
 
   async function removeMember(name: string) {
-    if (!confirm(`${name} を名前の一覧から外しますか？`)) return;
-    const next = members.filter((x) => x !== name);
-    await setMembers(next);
-    setMembersState(next);
+    dlg.confirm({
+      title: `${name} を外しますか？`,
+      body: "名前の一覧から外します。入力した記録は残ります。",
+      tone: "warn",
+      confirmLabel: "外す",
+      cancelLabel: "やめる",
+      success: { title: "外しました" },
+      onConfirm: async () => {
+        const next = members.filter((x) => x !== name);
+        await setMembers(next);
+        setMembersState(next);
+      },
+    });
   }
 
-  async function seedDemoItemsOnly() {
-    if (
-      !confirm(
-        "デモ用の品目（架空の業者・品目）を今の月に読み込みます。入力記録は作りません。実行しますか？",
-      )
-    )
-      return;
-    const suppliers = await db.suppliers.toArray();
-    const supplierMap = new Map<string, number>();
-    suppliers.forEach((s) => supplierMap.set(s.name, s.id!));
-    let order = suppliers.length;
-    for (const d of DEMO_ITEMS) {
-      let sid = supplierMap.get(d.supplier);
-      if (sid == null) {
-        order += 1;
-        sid = await db.suppliers.add({
-          name: d.supplier,
-          sort_order: order,
-        });
-        supplierMap.set(d.supplier, sid);
+  async function doSeedItemsOnly(): Promise<string> {
+    let added = 0;
+    let updated = 0;
+    await db.transaction("rw", db.suppliers, db.items, async () => {
+      const suppliers = await db.suppliers.toArray();
+      const supplierMap = new Map<string, number>();
+      suppliers.forEach((s) => supplierMap.set(s.name, s.id!));
+      let order = suppliers.length;
+      for (const d of DEMO_ITEMS) {
+        let sid = supplierMap.get(d.supplier);
+        if (sid == null) {
+          order += 1;
+          sid = await db.suppliers.add({
+            name: d.supplier,
+            sort_order: order,
+          });
+          supplierMap.set(d.supplier, sid);
+        }
+        const existing = await db.items
+          .where({ supplier_id: sid, name: d.name })
+          .first();
+        const payload = {
+          name: d.name,
+          reading: d.reading,
+          supplier_id: sid,
+          sheet_order: d.sheet_order,
+          unit: d.unit as Unit,
+          is_weight: d.is_weight,
+          unit_price: d.unit_price,
+          last_month_qty: d.last_month_qty,
+          active: 1 as const,
+          is_provisional: 0 as const,
+        };
+        if (existing) {
+          await db.items.update(existing.id!, payload);
+          updated += 1;
+        } else {
+          await db.items.add(payload);
+          added += 1;
+        }
       }
-      const existing = await db.items
-        .where({ supplier_id: sid, name: d.name })
-        .first();
-      const payload = {
-        name: d.name,
-        reading: d.reading,
-        supplier_id: sid,
-        sheet_order: d.sheet_order,
-        unit: d.unit as Unit,
-        is_weight: d.is_weight,
-        unit_price: d.unit_price,
-        last_month_qty: d.last_month_qty,
-        active: 1 as const,
-        is_provisional: 0 as const,
-      };
-      if (existing) await db.items.update(existing.id!, payload);
-      else await db.items.add(payload);
-    }
-    alert(`${DEMO_ITEMS.length} 品目を読み込みました。`);
+    });
+    return `新しく追加 ${added} 件 ／ 上書き ${updated} 件`;
   }
 
-  async function seedDemo() {
-    if (
-      !confirm(
-        "デモ用の棚卸し（月：DEMO）を作ります。架空の業者・品目と、わざと間違いを含んだ今月の入力を一括で入れます。本番データとは別の月になります。実行しますか？",
-      )
-    )
-      return;
+  function seedDemoItemsOnly() {
+    dlg.confirm({
+      title: "デモ用の品目を読み込みますか？",
+      body: "架空の業者・品目を今の月に読み込みます。入力記録は作りません。",
+      tone: "info",
+      confirmLabel: "読み込む",
+      cancelLabel: "やめる",
+      success: { title: "読み込みました" },
+      onConfirm: doSeedItemsOnly,
+    });
+  }
+
+  async function doSeedDemo(): Promise<string> {
     const demoMonth = "DEMO";
     const demoSt = await createStocktake(demoMonth);
     await setActiveStocktake(demoSt.id!);
@@ -284,20 +316,46 @@ export default function SettingsPage() {
       });
     }
 
-    alert("デモデータを入れました。月は DEMO に切り替えました。");
     reload();
+    return `月は「DEMO」に切り替えました。品目 ${DEMO_ITEMS.length} 件・入力 ${DEMO_ITEMS.filter((d) => d.demo_qty != null).length} 件`;
   }
 
-  async function clearDemo() {
-    const demo = await db.stocktakes.where("month").equals("DEMO").first();
-    if (!demo) {
-      alert("DEMO はありません。");
-      return;
-    }
-    if (!confirm("DEMO 月の入力記録と棚卸しを消しますか？品目・発注先は残ります。")) return;
-    await db.count_entries.where("stocktake_id").equals(demo.id!).delete();
-    await db.stocktakes.delete(demo.id!);
-    reload();
+  function seedDemo() {
+    dlg.confirm({
+      title: "デモ用の入力を作りますか？",
+      body:
+        "架空の業者・品目に、わざと間違いを含んだ入力を一括で入れます。月は「DEMO」になり、本番の月とは別です。",
+      tone: "info",
+      confirmLabel: "作る",
+      cancelLabel: "やめる",
+      success: { title: "デモ入力を作りました" },
+      onConfirm: doSeedDemo,
+    });
+  }
+
+  function clearDemo() {
+    dlg.confirm({
+      title: "DEMO 月を消しますか？",
+      body: "DEMO 月の入力記録と棚卸しを消します。品目・発注先は残ります。",
+      tone: "danger",
+      confirmLabel: "消す",
+      cancelLabel: "やめる",
+      success: { title: "DEMO 月を消しました" },
+      onConfirm: async (): Promise<string> => {
+        const demo = await db.stocktakes
+          .where("month")
+          .equals("DEMO")
+          .first();
+        if (!demo) return "DEMO 月はもともとありませんでした。";
+        await db.count_entries
+          .where("stocktake_id")
+          .equals(demo.id!)
+          .delete();
+        await db.stocktakes.delete(demo.id!);
+        reload();
+        return "";
+      },
+    });
   }
 
   async function exportBackup() {
@@ -321,196 +379,205 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   }
 
-  async function importBackup(e: React.ChangeEvent<HTMLInputElement>) {
+  function importBackup(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
+    e.target.value = "";
     if (!f) return;
-    if (
-      !confirm(
-        "バックアップから読み込みます。今の端末のデータに、同じ名前のものがあれば上書きされます。実行しますか？",
-      )
-    ) {
-      e.target.value = "";
-      return;
-    }
-    try {
-      const text = await f.text();
-      const dump = JSON.parse(text) as {
-        suppliers?: Array<{ name: string; sort_order: number }>;
-        items?: Array<Record<string, unknown>>;
-        stocktakes?: Array<Record<string, unknown>>;
-        count_entries?: Array<Record<string, unknown>>;
-        settings?: Array<{ key: string; value: string }>;
-      };
-
-      await db.transaction(
-        "rw",
-        db.suppliers,
-        db.items,
-        db.stocktakes,
-        db.count_entries,
-        db.settings,
-        async () => {
-          const supplierMap = new Map<string, number>();
-          const existingSuppliers = await db.suppliers.toArray();
-          existingSuppliers.forEach((s) => supplierMap.set(s.name, s.id!));
-          for (const s of dump.suppliers ?? []) {
-            let id = supplierMap.get(s.name);
-            if (id == null) {
-              id = await db.suppliers.add({
-                name: s.name,
-                sort_order: s.sort_order,
-              });
-              supplierMap.set(s.name, id);
-            }
-          }
-
-          const originalSupplierById = new Map<number, string>();
-          for (const s of (dump.suppliers ?? []) as Array<
-            { id?: number; name: string }
-          >) {
-            if (s.id != null) originalSupplierById.set(s.id, s.name);
-          }
-
-          const itemMap = new Map<number, number>();
-          const existingItems = await db.items.toArray();
-          const itemKey = (sid: number, name: string) => `${sid}:${name}`;
-          const existingItemsMap = new Map<string, number>();
-          existingItems.forEach((it) =>
-            existingItemsMap.set(itemKey(it.supplier_id, it.name), it.id!),
-          );
-          for (const raw of dump.items ?? []) {
-            const it = raw as {
-              id?: number;
-              name: string;
-              reading?: string;
-              supplier_id: number;
-              sheet_order: number;
-              unit: string;
-              is_weight: 0 | 1;
-              active: 0 | 1;
-              is_provisional: 0 | 1;
-              pack_qty?: number;
-              unit_price?: number;
-              last_month_qty?: number;
-              spec?: string;
-            };
-            const supplierName = originalSupplierById.get(it.supplier_id);
-            if (!supplierName) continue;
-            const newSid = supplierMap.get(supplierName);
-            if (newSid == null) continue;
-            const key = itemKey(newSid, it.name);
-            const payload = {
-              name: it.name,
-              reading: it.reading ?? "",
-              supplier_id: newSid,
-              sheet_order: it.sheet_order,
-              unit: it.unit as "箱",
-              is_weight: it.is_weight,
-              active: it.active,
-              is_provisional: it.is_provisional,
-              pack_qty: it.pack_qty,
-              unit_price: it.unit_price,
-              last_month_qty: it.last_month_qty,
-              spec: it.spec,
-            };
-            if (existingItemsMap.has(key)) {
-              const id = existingItemsMap.get(key)!;
-              await db.items.update(id, payload);
-              if (it.id != null) itemMap.set(it.id, id);
-            } else {
-              const id = await db.items.add(payload);
-              existingItemsMap.set(key, id);
-              if (it.id != null) itemMap.set(it.id, id);
-            }
-          }
-
-          const stMap = new Map<number, number>();
-          for (const raw of dump.stocktakes ?? []) {
-            const st = raw as {
-              id?: number;
-              month: string;
-              status: "open" | "closed";
-              tax_mode: "included" | "excluded";
-              tax_rate: number;
-              created_at: number;
-            };
-            const existing = await db.stocktakes
-              .where("month")
-              .equals(st.month)
-              .first();
-            if (existing) {
-              if (st.id != null) stMap.set(st.id, existing.id!);
-            } else {
-              const id = await db.stocktakes.add({
-                month: st.month,
-                status: st.status,
-                tax_mode: st.tax_mode,
-                tax_rate: st.tax_rate,
-                created_at: st.created_at,
-              });
-              if (st.id != null) stMap.set(st.id, id);
-            }
-          }
-
-          for (const raw of dump.count_entries ?? []) {
-            const e = raw as {
-              client_uid: string;
-              stocktake_id: number;
-              item_id: number;
-              qty: number;
-              mode: "set" | "add";
-              counted_by: string;
-              device_id: string;
-              counted_at: number;
-              synced_at?: number;
-            };
-            const newSt = stMap.get(e.stocktake_id);
-            const newIt = itemMap.get(e.item_id);
-            if (!newSt || !newIt) continue;
-            const dup = await db.count_entries
-              .where("client_uid")
-              .equals(e.client_uid)
-              .first();
-            if (dup) continue;
-            await db.count_entries.add({
-              client_uid: e.client_uid,
-              stocktake_id: newSt,
-              item_id: newIt,
-              qty: e.qty,
-              mode: e.mode,
-              counted_by: e.counted_by,
-              device_id: e.device_id,
-              counted_at: e.counted_at,
-              synced_at: e.synced_at,
-            });
-          }
-
-          for (const s of dump.settings ?? []) {
-            await db.settings.put(s);
-          }
-        },
-      );
-      alert("読み込みました。");
-    } catch (err) {
-      alert(`エラー：${(err as Error).message}`);
-    } finally {
-      e.target.value = "";
-    }
+    dlg.confirm({
+      title: "バックアップから読み込みますか？",
+      body:
+        "今の端末のデータに、同じ名前のものがあれば上書きされます（二重には入りません）。",
+      tone: "warn",
+      confirmLabel: "読み込む",
+      cancelLabel: "やめる",
+      success: { title: "読み込みました" },
+      onConfirm: () => doImportBackup(f),
+    });
   }
 
-  async function resetEntries() {
+  async function doImportBackup(f: File): Promise<string> {
+    const text = await f.text();
+    const counts = { suppliers: 0, items: 0, stocktakes: 0, entries: 0 };
+    const dump = JSON.parse(text) as {
+      suppliers?: Array<{ id?: number; name: string; sort_order: number }>;
+      items?: Array<Record<string, unknown>>;
+      stocktakes?: Array<Record<string, unknown>>;
+      count_entries?: Array<Record<string, unknown>>;
+      settings?: Array<{ key: string; value: string }>;
+    };
+
+    await db.transaction(
+      "rw",
+      db.suppliers,
+      db.items,
+      db.stocktakes,
+      db.count_entries,
+      db.settings,
+      async () => {
+        const supplierMap = new Map<string, number>();
+        const existingSuppliers = await db.suppliers.toArray();
+        existingSuppliers.forEach((s) => supplierMap.set(s.name, s.id!));
+        for (const s of dump.suppliers ?? []) {
+          let id = supplierMap.get(s.name);
+          if (id == null) {
+            id = await db.suppliers.add({
+              name: s.name,
+              sort_order: s.sort_order,
+            });
+            supplierMap.set(s.name, id);
+            counts.suppliers += 1;
+          }
+        }
+
+        const originalSupplierById = new Map<number, string>();
+        for (const s of dump.suppliers ?? []) {
+          if (s.id != null) originalSupplierById.set(s.id, s.name);
+        }
+
+        const itemMap = new Map<number, number>();
+        const existingItems = await db.items.toArray();
+        const itemKey = (sid: number, name: string) => `${sid}:${name}`;
+        const existingItemsMap = new Map<string, number>();
+        existingItems.forEach((it) =>
+          existingItemsMap.set(itemKey(it.supplier_id, it.name), it.id!),
+        );
+        for (const raw of dump.items ?? []) {
+          const it = raw as {
+            id?: number;
+            name: string;
+            reading?: string;
+            supplier_id: number;
+            sheet_order: number;
+            unit: string;
+            is_weight: 0 | 1;
+            active: 0 | 1;
+            is_provisional: 0 | 1;
+            pack_qty?: number;
+            unit_price?: number;
+            last_month_qty?: number;
+            spec?: string;
+          };
+          const supplierName = originalSupplierById.get(it.supplier_id);
+          if (!supplierName) continue;
+          const newSid = supplierMap.get(supplierName);
+          if (newSid == null) continue;
+          const key = itemKey(newSid, it.name);
+          const payload = {
+            name: it.name,
+            reading: it.reading ?? "",
+            supplier_id: newSid,
+            sheet_order: it.sheet_order,
+            unit: it.unit as "箱",
+            is_weight: it.is_weight,
+            active: it.active,
+            is_provisional: it.is_provisional,
+            pack_qty: it.pack_qty,
+            unit_price: it.unit_price,
+            last_month_qty: it.last_month_qty,
+            spec: it.spec,
+          };
+          if (existingItemsMap.has(key)) {
+            const id = existingItemsMap.get(key)!;
+            await db.items.update(id, payload);
+            if (it.id != null) itemMap.set(it.id, id);
+          } else {
+            const id = await db.items.add(payload);
+            existingItemsMap.set(key, id);
+            if (it.id != null) itemMap.set(it.id, id);
+            counts.items += 1;
+          }
+        }
+
+        const stMap = new Map<number, number>();
+        for (const raw of dump.stocktakes ?? []) {
+          const st = raw as {
+            id?: number;
+            month: string;
+            status: "open" | "closed";
+            tax_mode: "included" | "excluded";
+            tax_rate: number;
+            created_at: number;
+          };
+          const existing = await db.stocktakes
+            .where("month")
+            .equals(st.month)
+            .first();
+          if (existing) {
+            if (st.id != null) stMap.set(st.id, existing.id!);
+          } else {
+            const id = await db.stocktakes.add({
+              month: st.month,
+              status: st.status,
+              tax_mode: st.tax_mode,
+              tax_rate: st.tax_rate,
+              created_at: st.created_at,
+            });
+            if (st.id != null) stMap.set(st.id, id);
+            counts.stocktakes += 1;
+          }
+        }
+
+        for (const raw of dump.count_entries ?? []) {
+          const e = raw as {
+            client_uid: string;
+            stocktake_id: number;
+            item_id: number;
+            qty: number;
+            mode: "set" | "add";
+            counted_by: string;
+            device_id: string;
+            counted_at: number;
+            synced_at?: number;
+          };
+          const newSt = stMap.get(e.stocktake_id);
+          const newIt = itemMap.get(e.item_id);
+          if (!newSt || !newIt) continue;
+          const dup = await db.count_entries
+            .where("client_uid")
+            .equals(e.client_uid)
+            .first();
+          if (dup) continue;
+          await db.count_entries.add({
+            client_uid: e.client_uid,
+            stocktake_id: newSt,
+            item_id: newIt,
+            qty: e.qty,
+            mode: e.mode,
+            counted_by: e.counted_by,
+            device_id: e.device_id,
+            counted_at: e.counted_at,
+            synced_at: e.synced_at,
+          });
+          counts.entries += 1;
+        }
+
+        for (const s of dump.settings ?? []) {
+          await db.settings.put(s);
+        }
+      },
+    );
+    return `発注先 +${counts.suppliers} ／ 品目 +${counts.items} ／ 棚卸し +${counts.stocktakes} ／ 入力 +${counts.entries}`;
+  }
+
+  function resetEntries() {
     if (!stocktake) return;
-    if (
-      !confirm(
-        `${stocktake.month} の入力記録を全部消します（品目・発注先は残ります）。本当に消しますか？`,
-      )
-    )
-      return;
-    await db.count_entries
-      .where("stocktake_id")
-      .equals(stocktake.id!)
-      .delete();
-    alert("消しました。");
+    const stId = stocktake.id!;
+    const month = stocktake.month;
+    dlg.confirm({
+      title: `${month} の入力記録を全部消しますか？`,
+      body: "品目・発注先は残ります。元に戻せません。",
+      tone: "danger",
+      confirmLabel: "消す",
+      cancelLabel: "やめる",
+      success: { title: "消しました" },
+      onConfirm: async (): Promise<string> => {
+        const n = await db.count_entries
+          .where("stocktake_id")
+          .equals(stId)
+          .delete();
+        return `${n} 件の入力を消しました。`;
+      },
+    });
   }
 
   if (!stocktake) return <div className="p-4">読み込み中...</div>;
@@ -702,6 +769,12 @@ export default function SettingsPage() {
           今の月（{stocktake.month}）の入力記録を全部消す
         </button>
       </section>
+
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

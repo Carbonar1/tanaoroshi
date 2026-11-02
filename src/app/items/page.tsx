@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, Item, Unit, UNITS } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 type FormState = {
   name: string;
@@ -70,10 +71,16 @@ export default function ItemsPage() {
       });
   }, [items, filterSupplier, search, supplierMap]);
 
+  const dlg = useDialog();
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.reading.trim() || form.supplier_id === "") {
-      alert("品名・読み・発注先は必須です。");
+      dlg.info(
+        "入れていない項目があります",
+        "品名・読み・発注先は必ず入れてください。",
+        "warn",
+      );
       return;
     }
     const payload: Omit<Item, "id"> = {
@@ -95,13 +102,19 @@ export default function ItemsPage() {
       active: 1,
       is_provisional: 0,
     };
-    if (editingId == null) {
-      await db.items.add(payload);
-    } else {
-      await db.items.update(editingId, payload);
+    try {
+      if (editingId == null) {
+        await db.items.add(payload);
+        dlg.info(`「${payload.name}」を追加しました`, "", "success");
+      } else {
+        await db.items.update(editingId, payload);
+        dlg.info(`「${payload.name}」を更新しました`, "", "success");
+      }
+      setForm(EMPTY);
+      setEditingId(null);
+    } catch (e) {
+      dlg.info("保存できませんでした", humanize(e), "error");
     }
-    setForm(EMPTY);
-    setEditingId(null);
   }
 
   function onEdit(it: Item) {
@@ -121,13 +134,23 @@ export default function ItemsPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function onDelete(id: number) {
-    if (!confirm("この品目を削除しますか？")) return;
-    await db.items.delete(id);
-    if (editingId === id) {
-      setEditingId(null);
-      setForm(EMPTY);
-    }
+  function onDelete(id: number) {
+    const target = items?.find((x) => x.id === id);
+    dlg.confirm({
+      title: "この品目を消しますか？",
+      body: target ? `「${target.name}」を消します。` : "元に戻せません。",
+      tone: "danger",
+      confirmLabel: "消す",
+      cancelLabel: "やめる",
+      success: { title: "消しました" },
+      onConfirm: async () => {
+        await db.items.delete(id);
+        if (editingId === id) {
+          setEditingId(null);
+          setForm(EMPTY);
+        }
+      },
+    });
   }
 
   const [readingBusy, setReadingBusy] = useState(false);
@@ -487,6 +510,11 @@ export default function ItemsPage() {
           </div>
         ))}
       </section>
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

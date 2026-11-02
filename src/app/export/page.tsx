@@ -13,6 +13,7 @@ import {
 } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
 import { fmtQtyByUnit } from "@/lib/fmt";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 type Row = {
   item: Item;
@@ -170,42 +171,54 @@ export default function ExportPage() {
     downloadCsv(`棚卸し_${stocktake.month}.csv`, lines.join("\r\n"));
   }
 
-  async function closeStocktake() {
+  const dlg = useDialog();
+
+  function closeStocktake() {
     if (!stocktake) return;
-    if (
-      !confirm(
-        `${stocktake.month} の棚卸しを「確定」します。各品目の数量を、次の月の「先月の数量」として保存します。実行しますか？`,
-      )
-    )
-      return;
-    try {
-      await db.transaction("rw", db.stocktakes, db.items, async () => {
-        for (const g of groups) {
-          for (const r of g.rows) {
-            if (r.qty != null) {
-              await db.items.update(r.item.id!, { last_month_qty: r.qty });
+    const stId = stocktake.id!;
+    const month = stocktake.month;
+    dlg.confirm({
+      title: `${month} の棚卸しを確定しますか？`,
+      body: "各品目の数量を、次の月の「先月の数量」として残します。",
+      tone: "warn",
+      confirmLabel: "確定する",
+      cancelLabel: "やめる",
+      success: { title: "確定しました" },
+      onConfirm: async (): Promise<string> => {
+        let n = 0;
+        await db.transaction("rw", db.stocktakes, db.items, async () => {
+          for (const g of groups) {
+            for (const r of g.rows) {
+              if (r.qty != null) {
+                await db.items.update(r.item.id!, { last_month_qty: r.qty });
+                n += 1;
+              }
             }
           }
-        }
-        await db.stocktakes.update(stocktake.id!, { status: "closed" });
-      });
-      alert("確定しました。");
-      ensureCurrentStocktake().then(setStocktake);
-    } catch (e) {
-      alert(`エラー：${humanize(e)}`);
-    }
+          await db.stocktakes.update(stId, { status: "closed" });
+        });
+        ensureCurrentStocktake().then(setStocktake);
+        return `${n} 品目の数量を次の月の「先月」に残しました。`;
+      },
+    });
   }
 
-  async function reopenStocktake() {
+  function reopenStocktake() {
     if (!stocktake) return;
-    if (
-      !confirm(
-        `${stocktake.month} の確定を外します。確定後に直したいときに使います。`,
-      )
-    )
-      return;
-    await db.stocktakes.update(stocktake.id!, { status: "open" });
-    ensureCurrentStocktake().then(setStocktake);
+    const stId = stocktake.id!;
+    const month = stocktake.month;
+    dlg.confirm({
+      title: `${month} の確定を外しますか？`,
+      body: "確定後に直したいときに使います。",
+      tone: "warn",
+      confirmLabel: "外す",
+      cancelLabel: "やめる",
+      success: { title: "確定を外しました" },
+      onConfirm: async () => {
+        await db.stocktakes.update(stId, { status: "open" });
+        ensureCurrentStocktake().then(setStocktake);
+      },
+    });
   }
 
   if (!stocktake) return <div className="p-4">読み込み中...</div>;
@@ -397,6 +410,11 @@ export default function ExportPage() {
           }
         }
       `}</style>
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

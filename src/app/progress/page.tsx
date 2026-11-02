@@ -15,6 +15,7 @@ import {
   userName,
 } from "@/lib/db";
 import { fmtQtyByUnit } from "@/lib/fmt";
+import { Dialog, useDialog } from "@/components/Dialog";
 
 type ItemStat = {
   item: Item;
@@ -72,59 +73,77 @@ export default function ProgressPage() {
     });
   }, [suppliers, items, byItem]);
 
-  async function markAllMissingAsZero(supplierId: number) {
+  const dlg = useDialog();
+
+  function markAllMissingAsZero(supplierId: number) {
     if (!stocktake) return;
     const list = grouped.find((g) => g.supplier.id === supplierId);
     if (!list) return;
     const missing = list.stats.filter((x) => x.qty == null);
     if (missing.length === 0) return;
-    if (
-      !confirm(
-        `${list.supplier.name} の未入力 ${missing.length} 品目を「なし（0）」として登録します。`,
-      )
-    )
-      return;
-    const now = Date.now();
-    const dev = deviceId();
-    await db.count_entries.bulkAdd(
-      missing.map((x) => ({
-        client_uid: newClientUid(dev),
-        stocktake_id: stocktake.id!,
-        item_id: x.item.id!,
-        qty: 0,
-        mode: "set" as const,
-        counted_by: userName() || "未設定",
-        device_id: dev,
-        counted_at: now,
-      })),
-    );
+    const stId = stocktake.id!;
+    dlg.confirm({
+      title: `${list.supplier.name}`,
+      body: `未入力 ${missing.length} 品目を「なし（0）」として登録します。`,
+      tone: "warn",
+      confirmLabel: "登録する",
+      cancelLabel: "やめる",
+      success: { title: "登録しました" },
+      onConfirm: async (): Promise<string> => {
+        const now = Date.now();
+        const dev = deviceId();
+        await db.count_entries.bulkAdd(
+          missing.map((x) => ({
+            client_uid: newClientUid(dev),
+            stocktake_id: stId,
+            item_id: x.item.id!,
+            qty: 0,
+            mode: "set" as const,
+            counted_by: userName() || "未設定",
+            device_id: dev,
+            counted_at: now,
+          })),
+        );
+        return `${missing.length} 品目を「なし（0）」にしました。`;
+      },
+    });
   }
 
-  async function markAllMissingGlobal() {
+  function markAllMissingGlobal() {
     if (!stocktake) return;
     const missing = grouped.flatMap((g) =>
       g.stats.filter((x) => x.qty == null).map((x) => x.item),
     );
     if (missing.length === 0) {
-      alert("未入力の品目はありません。");
+      dlg.info("未入力はありません", "全ての品目に入力があります。", "success");
       return;
     }
-    if (!confirm(`未入力の ${missing.length} 品目を全部「なし（0）」にします。`))
-      return;
-    const now = Date.now();
-    const dev = deviceId();
-    await db.count_entries.bulkAdd(
-      missing.map((it) => ({
-        client_uid: newClientUid(dev),
-        stocktake_id: stocktake.id!,
-        item_id: it.id!,
-        qty: 0,
-        mode: "set" as const,
-        counted_by: userName() || "未設定",
-        device_id: dev,
-        counted_at: now,
-      })),
-    );
+    const stId = stocktake.id!;
+    dlg.confirm({
+      title: `未入力 ${missing.length} 品目を全部「なし（0）」にしますか？`,
+      body: "元に戻すときは、個別の品目を開いて記録を直してください。",
+      tone: "warn",
+      confirmLabel: "まとめて 0 にする",
+      cancelLabel: "やめる",
+      success: { title: "まとめて 0 にしました" },
+      onConfirm: async (): Promise<string> => {
+        const now = Date.now();
+        const dev = deviceId();
+        await db.count_entries.bulkAdd(
+          missing.map((it) => ({
+            client_uid: newClientUid(dev),
+            stocktake_id: stId,
+            item_id: it.id!,
+            qty: 0,
+            mode: "set" as const,
+            counted_by: userName() || "未設定",
+            device_id: dev,
+            counted_at: now,
+          })),
+        );
+        return `${missing.length} 品目を 0 にしました。`;
+      },
+    });
   }
 
   if (!stocktake) return <div className="p-4">読み込み中...</div>;
@@ -285,6 +304,11 @@ export default function ProgressPage() {
           </ul>
         </section>
       ))}
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }

@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import Papa from "papaparse";
 import { db, Unit, UNITS } from "@/lib/db";
+import { Dialog, useDialog } from "@/components/Dialog";
+import { humanize } from "@/lib/humanError";
 
 type Row = {
   業者名?: string;
@@ -40,6 +42,7 @@ export default function ImportPage() {
   const [result, setResult] = useState<string>("");
   const [replaceAll, setReplaceAll] = useState(false);
   const [busy, setBusy] = useState(false);
+  const dlg = useDialog();
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -89,10 +92,23 @@ export default function ImportPage() {
     });
   }
 
-  async function onImport() {
+  function onImport() {
     if (rows.length === 0) return;
     const valid = rows.filter((r) => !r.error);
-    if (!confirm(`${valid.length}件を取り込みます。よろしいですか？`)) return;
+    dlg.confirm({
+      title: `${valid.length} 件を読み込みますか？`,
+      body: replaceAll
+        ? "⚠ 既存の発注先・品目を全部消してから読み込みます。"
+        : "既存のものは、同じ発注先＋同じ品名なら上書きします。",
+      tone: replaceAll ? "danger" : "info",
+      confirmLabel: "読み込む",
+      cancelLabel: "やめる",
+      success: { title: "読み込みました" },
+      onConfirm: () => doImport(valid),
+    });
+  }
+
+  async function doImport(valid: Parsed[]): Promise<string> {
     setBusy(true);
     try {
       await db.transaction("rw", db.suppliers, db.items, async () => {
@@ -137,11 +153,12 @@ export default function ImportPage() {
           }
         }
       });
-      setResult(`取り込み完了：${valid.length}件`);
       setRows([]);
       setFileName("");
+      setResult("");
+      return `${valid.length} 件を読み込みました。`;
     } catch (e) {
-      setResult(`エラー：${(e as Error).message}`);
+      throw new Error(humanize(e));
     } finally {
       setBusy(false);
     }
@@ -239,6 +256,11 @@ export default function ImportPage() {
           </div>
         </section>
       )}
+      <Dialog
+        state={dlg.state}
+        onConfirm={dlg.handleConfirm}
+        onClose={dlg.close}
+      />
     </main>
   );
 }
