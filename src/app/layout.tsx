@@ -6,7 +6,11 @@ export const metadata: Metadata = {
   description: "調理場の月末棚卸しWebアプリ",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-gray-50 text-gray-900 text-[18px]">
