@@ -12,6 +12,7 @@ import {
 import { hasSupabase } from "@/lib/supabase";
 import { syncNow } from "@/lib/sync";
 import { humanize } from "@/lib/humanError";
+import { retryDelay } from "@/lib/retry";
 
 export default function StatusBar() {
   const [online, setOnline] = useState(true);
@@ -26,6 +27,39 @@ export default function StatusBar() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState("");
   const autoFiredRef = useRef(false);
+  const retryAttemptRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unsyncedRef = useRef(0);
+  useEffect(() => {
+    unsyncedRef.current = unsynced ?? 0;
+  }, [unsynced]);
+
+  function clearRetry() {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }
+
+  function scheduleRetry() {
+    clearRetry();
+    const delay = retryDelay(retryAttemptRef.current);
+    retryAttemptRef.current += 1;
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.onLine &&
+        unsyncedRef.current > 0
+      ) {
+        runSync(false);
+      }
+    }, delay);
+    setSyncMsg(
+      (prev) =>
+        `${prev || "送信できませんでした"}（${Math.round(delay / 1000)}秒後にもう一度試します）`,
+    );
+  }
 
   async function runSync(manual: boolean) {
     if (!hasSupabase()) {
@@ -37,6 +71,7 @@ export default function StatusBar() {
       return;
     }
     if (syncing) return;
+    clearRetry();
     setSyncing(true);
     setSyncMsg("送信中...");
     try {
@@ -44,16 +79,25 @@ export default function StatusBar() {
       const r = await syncNow(st);
       if (r.errors.length > 0) {
         setSyncMsg(humanize(r.errors[0]));
+        if (unsyncedRef.current > 0 && navigator.onLine) scheduleRetry();
       } else {
+        retryAttemptRef.current = 0;
         setSyncMsg(
           `送信${r.pushedEntries}・受信${r.pulledEntries}・品目${r.pulledItems + r.pushedItems}`,
         );
       }
     } catch (e) {
       setSyncMsg(humanize(e));
+      if (unsyncedRef.current > 0 && navigator.onLine) scheduleRetry();
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMsg(""), 4000);
+      setTimeout(() => {
+        setSyncMsg((cur) =>
+          cur.startsWith("送信中") || cur.startsWith("送信：")
+            ? ""
+            : cur,
+        );
+      }, 4000);
     }
   }
 
@@ -74,14 +118,34 @@ export default function StatusBar() {
     }
     const on = () => {
       setOnline(true);
+      retryAttemptRef.current = 0;
       if (hasSupabase()) runSync(false);
     };
-    const off = () => setOnline(false);
+    const off = () => {
+      setOnline(false);
+      clearRetry();
+    };
+    const onVisible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        navigator.onLine &&
+        hasSupabase() &&
+        unsyncedRef.current > 0
+      ) {
+        runSync(false);
+      }
+    };
+    const onFocus = () => onVisible();
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      clearRetry();
     };
   }, []);
 
