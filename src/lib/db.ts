@@ -1,4 +1,5 @@
 import Dexie, { Table } from "dexie";
+export { computeQty } from "./qty";
 
 export type Unit =
   | "箱"
@@ -217,22 +218,3 @@ export function setUserName(name: string): void {
   localStorage.setItem("tanaoroshi.user_name", name);
 }
 
-export function computeQty(entries: CountEntry[]): number | null {
-  if (entries.length === 0) return null;
-  const sorted = [...entries].sort((a, b) => a.counted_at - b.counted_at);
-  let lastSetIdx = -1;
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    if (sorted[i].mode === "set") {
-      lastSetIdx = i;
-      break;
-    }
-  }
-  if (lastSetIdx === -1) {
-    return sorted.reduce((a, e) => a + e.qty, 0);
-  }
-  let total = sorted[lastSetIdx].qty;
-  for (let i = lastSetIdx + 1; i < sorted.length; i++) {
-    total += sorted[i].qty;
-  }
-  return total;
-}
