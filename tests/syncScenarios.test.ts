@@ -186,9 +186,9 @@ function sync(
       .filter((x): x is Row => x !== null),
     ["supplier_id", "name"],
   );
-  const itemRes = itemPayload.length
-    ? server.items.upsert(itemPayload, "supplier_id,name")
-    : [];
+  if (itemPayload.length) {
+    server.items.upsert(itemPayload, "supplier_id,name");
+  }
   const itemMap = new Map<number, number>();
   // サーバーの行をキーで引けるように
   const remoteItems = server.items.select();

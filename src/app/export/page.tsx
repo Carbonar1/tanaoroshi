@@ -11,7 +11,6 @@ import {
   db,
   ensureCurrentStocktake,
 } from "@/lib/db";
-import { humanize } from "@/lib/humanError";
 import { fmtQtyByUnit } from "@/lib/fmt";
 import { Dialog, useDialog } from "@/components/Dialog";
 
