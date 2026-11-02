@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import StatusBar from "@/components/StatusBar";
+import PwaRegister from "@/components/PwaRegister";
 
 export const metadata: Metadata = {
   title: "棚卸しアシスタント",
@@ -29,6 +30,7 @@ export default function RootLayout({
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-gray-50 text-gray-900 text-[18px]">
         <StatusBar />
+        <PwaRegister />
         {children}
       </body>
     </html>
