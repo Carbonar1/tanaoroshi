@@ -7,17 +7,14 @@ export function humanize(e: unknown): string {
   if (/supabase/i.test(msg) || /PGRST/i.test(msg)) {
     return "データの保管先につながりませんでした。電波が戻ってから、もう一度押してください。";
   }
-  if (/anthropic|claude/i.test(msg) || /x-api-key/i.test(msg)) {
-    return "Claude の呼び出しに失敗しました。少し時間をおいて、もう一度試してください。";
-  }
   if (/ANTHROPIC_API_KEY/i.test(msg)) {
     return "Claude の鍵がまだ設定されていません。管理者に伝えてください。";
   }
-  if (/ANTHROPIC/.test(msg)) {
-    return "Claude の呼び出しに失敗しました（通信・鍵・使用上限のいずれか）。";
-  }
   if (/503/.test(msg) || /502/.test(msg) || /504/.test(msg)) {
     return "外のサービスが一時的に応答していません。少し待ってから、もう一度試してください。";
+  }
+  if (/anthropic|claude/i.test(msg) || /x-api-key/i.test(msg)) {
+    return "Claude の呼び出しに失敗しました。少し時間をおいて、もう一度試してください。";
   }
   if (/429/.test(msg)) {
     return "呼び出しが混み合っています。1 分ほど待ってから、もう一度試してください。";

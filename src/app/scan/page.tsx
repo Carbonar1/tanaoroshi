@@ -70,12 +70,20 @@ export default function ScanPage() {
 
   function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const list = Array.from(e.target.files ?? []);
+    previews.forEach((u) => URL.revokeObjectURL(u));
     setFiles(list);
     setPreviews(list.map((f) => URL.createObjectURL(f)));
     setDrafts([]);
     setError("");
     setResult("");
   }
+
+  useEffect(() => {
+    return () => {
+      previews.forEach((u) => URL.revokeObjectURL(u));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function runScan() {
     if (files.length === 0) return;
