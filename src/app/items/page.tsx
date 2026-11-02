@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, Item, Unit, UNITS } from "@/lib/db";
+import { humanize } from "@/lib/humanError";
 
 type FormState = {
   name: string;
@@ -129,12 +130,113 @@ export default function ItemsPage() {
     }
   }
 
+  const [readingBusy, setReadingBusy] = useState(false);
+  const [readingMsg, setReadingMsg] = useState("");
+  const [pending, setPending] = useState<
+    Array<{ id: number; name: string; reading: string }>
+  >([]);
+
+  async function fetchReadings() {
+    const missing = (items ?? []).filter((it) => !it.reading?.trim());
+    if (missing.length === 0) {
+      setReadingMsg("読みが空の品目はありません。");
+      return;
+    }
+    setReadingBusy(true);
+    setReadingMsg("");
+    try {
+      const res = await fetch("/api/items/readings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          items: missing.map((it) => ({ id: it.id, name: it.name })),
+        }),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`サーバー ${res.status}: ${t.slice(0, 200)}`);
+      }
+      const data = (await res.json()) as {
+        readings?: { id: number; reading: string }[];
+      };
+      const list = (data.readings ?? []).map((r) => ({
+        id: r.id,
+        name: missing.find((it) => it.id === r.id)?.name ?? "",
+        reading: r.reading,
+      }));
+      setPending(list);
+      setReadingMsg(`${list.length} 件の候補ができました。確認して保存してください。`);
+    } catch (e) {
+      setReadingMsg(`エラー：${humanize(e)}`);
+    } finally {
+      setReadingBusy(false);
+    }
+  }
+
+  async function applyReadings() {
+    for (const p of pending) {
+      if (p.reading.trim()) {
+        await db.items.update(p.id, { reading: p.reading.trim() });
+      }
+    }
+    setPending([]);
+    setReadingMsg("保存しました。");
+  }
+
   return (
     <main className="p-4 max-w-2xl mx-auto w-full flex flex-col gap-4">
       <Link href="/" className="text-blue-600 underline text-sm">
         ← ホーム
       </Link>
       <h1 className="text-2xl font-bold">品目の管理</h1>
+
+      <section className="bg-white rounded shadow p-3 flex flex-col gap-2">
+        <h2 className="text-sm font-semibold">読み（ひらがな）の一括作成</h2>
+        <div className="text-xs text-gray-600">
+          読みが空の品目について、Claude でまとめて候補を作ります。保存前に確認できます。
+        </div>
+        <button
+          onClick={fetchReadings}
+          disabled={readingBusy}
+          className="bg-purple-600 text-white rounded px-3 py-2 text-sm font-semibold disabled:bg-gray-300"
+        >
+          {readingBusy ? "作成中..." : "Claude で候補を作る"}
+        </button>
+        {readingMsg && (
+          <div className="text-xs text-blue-700">{readingMsg}</div>
+        )}
+        {pending.length > 0 && (
+          <>
+            <ul className="text-sm flex flex-col gap-1 max-h-60 overflow-auto">
+              {pending.map((p, i) => (
+                <li
+                  key={p.id}
+                  className="flex items-center gap-2 border-b py-1"
+                >
+                  <span className="w-32 truncate">{p.name}</span>
+                  <input
+                    value={p.reading}
+                    onChange={(e) =>
+                      setPending((cur) =>
+                        cur.map((x, j) =>
+                          j === i ? { ...x, reading: e.target.value } : x,
+                        ),
+                      )
+                    }
+                    className="border rounded px-2 py-1 flex-1"
+                  />
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={applyReadings}
+              className="bg-emerald-600 text-white rounded px-3 py-2 text-sm font-semibold"
+            >
+              {pending.length} 件を保存
+            </button>
+          </>
+        )}
+      </section>
 
       {suppliers?.length === 0 && (
         <div className="bg-amber-100 text-amber-900 rounded p-3 text-sm">

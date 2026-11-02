@@ -11,6 +11,7 @@ import {
   db,
   ensureCurrentStocktake,
 } from "@/lib/db";
+import { humanize } from "@/lib/humanError";
 
 type Row = {
   item: Item;
@@ -168,10 +169,49 @@ export default function ExportPage() {
     downloadCsv(`棚卸し_${stocktake.month}.csv`, lines.join("\r\n"));
   }
 
+  async function closeStocktake() {
+    if (!stocktake) return;
+    if (
+      !confirm(
+        `${stocktake.month} の棚卸しを「確定」します。各品目の数量を、次の月の「先月の数量」として保存します。実行しますか？`,
+      )
+    )
+      return;
+    try {
+      await db.transaction("rw", db.stocktakes, db.items, async () => {
+        for (const g of groups) {
+          for (const r of g.rows) {
+            if (r.qty != null) {
+              await db.items.update(r.item.id!, { last_month_qty: r.qty });
+            }
+          }
+        }
+        await db.stocktakes.update(stocktake.id!, { status: "closed" });
+      });
+      alert("確定しました。");
+      ensureCurrentStocktake().then(setStocktake);
+    } catch (e) {
+      alert(`エラー：${humanize(e)}`);
+    }
+  }
+
+  async function reopenStocktake() {
+    if (!stocktake) return;
+    if (
+      !confirm(
+        `${stocktake.month} の確定を外します。確定後に直したいときに使います。`,
+      )
+    )
+      return;
+    await db.stocktakes.update(stocktake.id!, { status: "open" });
+    ensureCurrentStocktake().then(setStocktake);
+  }
+
   if (!stocktake) return <div className="p-4">読み込み中...</div>;
 
   const taxLabel =
     stocktake.tax_mode === "included" ? "税込" : "税抜";
+  const isClosed = stocktake.status === "closed";
 
   return (
     <main className="p-4 max-w-4xl mx-auto w-full flex flex-col gap-4">
@@ -192,8 +232,28 @@ export default function ExportPage() {
           >
             CSVを出す
           </button>
+          {isClosed ? (
+            <button
+              onClick={reopenStocktake}
+              className="bg-amber-500 text-white px-4 py-2 rounded"
+            >
+              確定を外す
+            </button>
+          ) : (
+            <button
+              onClick={closeStocktake}
+              className="bg-rose-600 text-white px-4 py-2 rounded"
+            >
+              この月を確定する
+            </button>
+          )}
         </div>
       </div>
+      {isClosed && (
+        <div className="bg-emerald-50 text-emerald-800 rounded p-2 text-sm no-print">
+          この月は確定済みです。各品目の数量は、次の月の「先月の数量」として保存されています。
+        </div>
+      )}
 
       <h1 className="text-2xl font-bold">調理棚卸表（{stocktake.month}）</h1>
       <div className="text-sm">
@@ -281,6 +341,10 @@ export default function ExportPage() {
 
       <style jsx global>{`
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm 12mm;
+          }
           .no-print,
           nav,
           header,
@@ -289,10 +353,46 @@ export default function ExportPage() {
           }
           body {
             background: white !important;
+            font-size: 12pt;
+          }
+          main {
+            padding: 0 !important;
+            max-width: none !important;
           }
           section {
             box-shadow: none !important;
+            background: white !important;
+            border: none !important;
+            padding: 0 !important;
+            margin-bottom: 8mm !important;
             page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          section + section {
+            page-break-before: auto;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          th,
+          td {
+            border: 1px solid #333 !important;
+            padding: 3pt 5pt !important;
+          }
+          thead {
+            display: table-header-group;
+          }
+          tr {
+            page-break-inside: avoid;
+          }
+          h1 {
+            font-size: 16pt;
+            margin-bottom: 4mm;
+          }
+          h2 {
+            font-size: 14pt;
+            margin: 2mm 0;
           }
         }
       `}</style>

@@ -131,6 +131,14 @@ export default function ProgressPage() {
   const totalItems = grouped.reduce((a, g) => a + g.total, 0);
   const totalDone = grouped.reduce((a, g) => a + g.done, 0);
 
+  const byPerson = new Map<string, Set<number>>();
+  entries?.forEach((e) => {
+    const name = e.counted_by || "名前なし";
+    const s = byPerson.get(name) ?? new Set<number>();
+    s.add(e.item_id);
+    byPerson.set(name, s);
+  });
+
   return (
     <main className="p-4 max-w-3xl mx-auto w-full flex flex-col gap-4">
       <Link href="/" className="text-blue-600 underline text-sm">
@@ -152,6 +160,24 @@ export default function ProgressPage() {
           未入力を全部「なし（0）」
         </button>
       </div>
+
+      {byPerson.size > 0 && (
+        <section className="bg-white rounded-lg shadow p-3">
+          <h2 className="text-sm font-semibold mb-1">入力した人</h2>
+          <ul className="text-sm flex flex-wrap gap-2">
+            {Array.from(byPerson.entries())
+              .sort((a, b) => b[1].size - a[1].size)
+              .map(([name, items]) => (
+                <li
+                  key={name}
+                  className="bg-gray-100 rounded-full px-3 py-1"
+                >
+                  {name}：<b>{items.size}</b> 品目
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
 
       {grouped.map((g) => (
         <section
@@ -178,38 +204,71 @@ export default function ProgressPage() {
             {g.stats.map((x) => (
               <li
                 key={x.item.id}
-                className="py-2 flex items-center justify-between gap-2"
+                className="py-2 flex flex-col gap-1"
               >
-                <div className="flex-1">
-                  <div
-                    className={
-                      x.qty == null
-                        ? "text-base text-red-600"
-                        : "text-base"
-                    }
-                  >
-                    {x.item.name}
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    順{x.item.sheet_order} / {x.item.unit}
-                    {x.item.last_month_qty != null
-                      ? ` / 先月 ${x.item.last_month_qty}`
-                      : ""}
-                  </div>
-                </div>
-                <div className="text-right">
-                  {x.qty == null ? (
-                    <span className="text-red-600 text-sm">未入力</span>
-                  ) : (
-                    <span className="text-lg font-semibold">
-                      {x.item.is_weight ? x.qty.toFixed(2) : x.qty}
-                      <span className="text-sm ml-1">{x.item.unit}</span>
-                    </span>
+                <details>
+                  <summary className="flex items-center justify-between gap-2 cursor-pointer list-none">
+                    <div className="flex-1">
+                      <div
+                        className={
+                          x.qty == null
+                            ? "text-base text-red-600"
+                            : "text-base"
+                        }
+                      >
+                        {x.item.name}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        順{x.item.sheet_order} / {x.item.unit}
+                        {x.item.last_month_qty != null
+                          ? ` / 先月 ${x.item.last_month_qty}`
+                          : ""}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      {x.qty == null ? (
+                        <span className="text-red-600 text-sm">未入力</span>
+                      ) : (
+                        <span className="text-lg font-semibold">
+                          {x.item.is_weight ? x.qty.toFixed(2) : x.qty}
+                          <span className="text-sm ml-1">{x.item.unit}</span>
+                        </span>
+                      )}
+                      <div className="text-xs text-gray-400">
+                        記録 {x.entryCount}
+                      </div>
+                    </div>
+                  </summary>
+                  {x.entryCount > 0 && (
+                    <ul className="mt-1 text-xs text-gray-700 bg-gray-50 rounded p-2 flex flex-col gap-1">
+                      {(byItem.get(x.item.id!) ?? [])
+                        .sort((a, b) => a.counted_at - b.counted_at)
+                        .map((e) => (
+                          <li
+                            key={e.id}
+                            className="flex items-center justify-between"
+                          >
+                            <span>
+                              {new Date(e.counted_at).toLocaleString("ja-JP", {
+                                month: "numeric",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}{" "}
+                              / {e.counted_by || "名前なし"}
+                            </span>
+                            <span>
+                              {e.mode === "set" ? "決定" : "足す"}{" "}
+                              <b>
+                                {x.item.is_weight ? e.qty.toFixed(2) : e.qty}
+                                {x.item.unit}
+                              </b>
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
                   )}
-                  <div className="text-xs text-gray-400">
-                    記録 {x.entryCount}
-                  </div>
-                </div>
+                </details>
               </li>
             ))}
           </ul>

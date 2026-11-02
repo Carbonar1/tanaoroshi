@@ -166,6 +166,204 @@ export default function SettingsPage() {
     reload();
   }
 
+  async function exportBackup() {
+    const dump = {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      suppliers: await db.suppliers.toArray(),
+      items: await db.items.toArray(),
+      stocktakes: await db.stocktakes.toArray(),
+      count_entries: await db.count_entries.toArray(),
+      settings: await db.settings.toArray(),
+    };
+    const blob = new Blob([JSON.stringify(dump, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `tanaoroshi-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importBackup(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (
+      !confirm(
+        "バックアップから読み込みます。今の端末のデータに、同じ名前のものがあれば上書きされます。実行しますか？",
+      )
+    ) {
+      e.target.value = "";
+      return;
+    }
+    try {
+      const text = await f.text();
+      const dump = JSON.parse(text) as {
+        suppliers?: Array<{ name: string; sort_order: number }>;
+        items?: Array<Record<string, unknown>>;
+        stocktakes?: Array<Record<string, unknown>>;
+        count_entries?: Array<Record<string, unknown>>;
+        settings?: Array<{ key: string; value: string }>;
+      };
+
+      await db.transaction(
+        "rw",
+        db.suppliers,
+        db.items,
+        db.stocktakes,
+        db.count_entries,
+        db.settings,
+        async () => {
+          const supplierMap = new Map<string, number>();
+          const existingSuppliers = await db.suppliers.toArray();
+          existingSuppliers.forEach((s) => supplierMap.set(s.name, s.id!));
+          for (const s of dump.suppliers ?? []) {
+            let id = supplierMap.get(s.name);
+            if (id == null) {
+              id = await db.suppliers.add({
+                name: s.name,
+                sort_order: s.sort_order,
+              });
+              supplierMap.set(s.name, id);
+            }
+          }
+
+          const originalSupplierById = new Map<number, string>();
+          for (const s of (dump.suppliers ?? []) as Array<
+            { id?: number; name: string }
+          >) {
+            if (s.id != null) originalSupplierById.set(s.id, s.name);
+          }
+
+          const itemMap = new Map<number, number>();
+          const existingItems = await db.items.toArray();
+          const itemKey = (sid: number, name: string) => `${sid}:${name}`;
+          const existingItemsMap = new Map<string, number>();
+          existingItems.forEach((it) =>
+            existingItemsMap.set(itemKey(it.supplier_id, it.name), it.id!),
+          );
+          for (const raw of dump.items ?? []) {
+            const it = raw as {
+              id?: number;
+              name: string;
+              reading?: string;
+              supplier_id: number;
+              sheet_order: number;
+              unit: string;
+              is_weight: 0 | 1;
+              active: 0 | 1;
+              is_provisional: 0 | 1;
+              pack_qty?: number;
+              unit_price?: number;
+              last_month_qty?: number;
+              spec?: string;
+            };
+            const supplierName = originalSupplierById.get(it.supplier_id);
+            if (!supplierName) continue;
+            const newSid = supplierMap.get(supplierName);
+            if (newSid == null) continue;
+            const key = itemKey(newSid, it.name);
+            const payload = {
+              name: it.name,
+              reading: it.reading ?? "",
+              supplier_id: newSid,
+              sheet_order: it.sheet_order,
+              unit: it.unit as "箱",
+              is_weight: it.is_weight,
+              active: it.active,
+              is_provisional: it.is_provisional,
+              pack_qty: it.pack_qty,
+              unit_price: it.unit_price,
+              last_month_qty: it.last_month_qty,
+              spec: it.spec,
+            };
+            if (existingItemsMap.has(key)) {
+              const id = existingItemsMap.get(key)!;
+              await db.items.update(id, payload);
+              if (it.id != null) itemMap.set(it.id, id);
+            } else {
+              const id = await db.items.add(payload);
+              existingItemsMap.set(key, id);
+              if (it.id != null) itemMap.set(it.id, id);
+            }
+          }
+
+          const stMap = new Map<number, number>();
+          for (const raw of dump.stocktakes ?? []) {
+            const st = raw as {
+              id?: number;
+              month: string;
+              status: "open" | "closed";
+              tax_mode: "included" | "excluded";
+              tax_rate: number;
+              created_at: number;
+            };
+            const existing = await db.stocktakes
+              .where("month")
+              .equals(st.month)
+              .first();
+            if (existing) {
+              if (st.id != null) stMap.set(st.id, existing.id!);
+            } else {
+              const id = await db.stocktakes.add({
+                month: st.month,
+                status: st.status,
+                tax_mode: st.tax_mode,
+                tax_rate: st.tax_rate,
+                created_at: st.created_at,
+              });
+              if (st.id != null) stMap.set(st.id, id);
+            }
+          }
+
+          for (const raw of dump.count_entries ?? []) {
+            const e = raw as {
+              client_uid: string;
+              stocktake_id: number;
+              item_id: number;
+              qty: number;
+              mode: "set" | "add";
+              counted_by: string;
+              device_id: string;
+              counted_at: number;
+              synced_at?: number;
+            };
+            const newSt = stMap.get(e.stocktake_id);
+            const newIt = itemMap.get(e.item_id);
+            if (!newSt || !newIt) continue;
+            const dup = await db.count_entries
+              .where("client_uid")
+              .equals(e.client_uid)
+              .first();
+            if (dup) continue;
+            await db.count_entries.add({
+              client_uid: e.client_uid,
+              stocktake_id: newSt,
+              item_id: newIt,
+              qty: e.qty,
+              mode: e.mode,
+              counted_by: e.counted_by,
+              device_id: e.device_id,
+              counted_at: e.counted_at,
+              synced_at: e.synced_at,
+            });
+          }
+
+          for (const s of dump.settings ?? []) {
+            await db.settings.put(s);
+          }
+        },
+      );
+      alert("読み込みました。");
+    } catch (err) {
+      alert(`エラー：${(err as Error).message}`);
+    } finally {
+      e.target.value = "";
+    }
+  }
+
   async function resetEntries() {
     if (!stocktake) return;
     if (
@@ -312,6 +510,28 @@ export default function SettingsPage() {
             </button>
           </div>
         ))}
+      </section>
+
+      <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">
+        <h2 className="text-lg font-semibold">バックアップ</h2>
+        <div className="text-sm text-gray-600">
+          端末の全データ（発注先・品目・棚卸し・入力記録・設定）を 1 つのファイルに書き出せます。別の端末や事故のあと戻すときに使います。
+        </div>
+        <button
+          onClick={exportBackup}
+          className="bg-sky-600 text-white rounded py-3 text-base font-semibold"
+        >
+          バックアップを書き出す
+        </button>
+        <label className="bg-sky-100 text-sky-900 rounded py-3 text-base text-center cursor-pointer">
+          バックアップから読み込む
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={importBackup}
+            className="hidden"
+          />
+        </label>
       </section>
 
       <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">

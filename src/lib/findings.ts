@@ -100,6 +100,26 @@ export function detectFindings(
       }
     }
 
+    // 別端末からの set が食い違う（最新の set と、別端末の直近 set の値が違う）
+    const sets = es.filter((e) => e.mode === "set");
+    if (sets.length >= 2) {
+      const sortedSets = [...sets].sort((a, b) => b.counted_at - a.counted_at);
+      const latest = sortedSets[0];
+      const other = sortedSets.find(
+        (s) => s.device_id !== latest.device_id && s.qty !== latest.qty,
+      );
+      if (other) {
+        list.push({
+          id: `conflict-${it.id}-${latest.id}-${other.id}`,
+          item: it,
+          severity: "mid",
+          title: `${it.name}：別の端末で違う数が「決定」されています`,
+          reason: `${latest.counted_by || latest.device_id} は ${latest.qty}${it.unit}、${other.counted_by || other.device_id} は ${other.qty}${it.unit} を「決定」で入れました。`,
+          suggestion: `どちらが正しいかを確認し、見直し画面で正しい数を「決定」で入れ直してください。`,
+        });
+      }
+    }
+
     if (qty == null && last != null && last > 0) {
       list.push({
         id: `miss-${it.id}`,
