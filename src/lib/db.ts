@@ -107,7 +107,29 @@ export function currentMonth(): string {
 }
 
 export async function ensureCurrentStocktake(): Promise<Stocktake> {
+  const activeId = await getSetting("active_stocktake_id", "");
+  if (activeId) {
+    const row = await db.stocktakes.get(Number(activeId));
+    if (row) return row;
+  }
   const month = currentMonth();
+  const existing = await db.stocktakes.where("month").equals(month).first();
+  if (existing) {
+    await setSetting("active_stocktake_id", String(existing.id));
+    return existing;
+  }
+  const id = await db.stocktakes.add({
+    month,
+    status: "open",
+    tax_mode: "excluded",
+    tax_rate: 8,
+    created_at: Date.now(),
+  });
+  await setSetting("active_stocktake_id", String(id));
+  return (await db.stocktakes.get(id))!;
+}
+
+export async function createStocktake(month: string): Promise<Stocktake> {
   const existing = await db.stocktakes.where("month").equals(month).first();
   if (existing) return existing;
   const id = await db.stocktakes.add({
@@ -118,6 +140,25 @@ export async function ensureCurrentStocktake(): Promise<Stocktake> {
     created_at: Date.now(),
   });
   return (await db.stocktakes.get(id))!;
+}
+
+export async function setActiveStocktake(id: number): Promise<void> {
+  await setSetting("active_stocktake_id", String(id));
+}
+
+export async function getMembers(): Promise<string[]> {
+  const raw = await getSetting("members", "[]");
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setMembers(list: string[]): Promise<void> {
+  const unique = Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
+  await setSetting("members", JSON.stringify(unique));
 }
 
 export async function getSetting(

@@ -7,6 +7,7 @@ import {
   CountEntry,
   Item,
   Stocktake,
+  Unit,
   computeQty,
   db,
   deviceId,
@@ -19,11 +20,25 @@ function fmtQty(q: number, isWeight: 0 | 1): string {
   return isWeight ? q.toFixed(2) : String(q);
 }
 
+function altUnit(u: Unit): Unit | null {
+  if (u === "kg") return "g";
+  if (u === "g") return "kg";
+  return null;
+}
+
+function convertToItemUnit(value: number, from: Unit, to: Unit): number {
+  if (from === to) return value;
+  if (from === "g" && to === "kg") return value / 1000;
+  if (from === "kg" && to === "g") return value * 1000;
+  return value;
+}
+
 export default function CountPage() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Item | null>(null);
   const [qtyInput, setQtyInput] = useState("");
+  const [inputUnit, setInputUnit] = useState<Unit | null>(null);
   const [toast, setToast] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -85,16 +100,18 @@ export default function CountPage() {
 
   async function saveEntry(mode: "set" | "add", qtyOverride?: number) {
     if (!stocktake || !selected) return;
-    const q =
+    const useUnit = inputUnit ?? selected.unit;
+    const raw =
       qtyOverride != null
         ? qtyOverride
-        : selected.is_weight
+        : selected.is_weight || useUnit === "kg" || useUnit === "g"
           ? Number(qtyInput)
           : Math.trunc(Number(qtyInput));
-    if (!Number.isFinite(q) || q < 0) {
+    if (!Number.isFinite(raw) || raw < 0) {
       alert("数量を正しく入れてください。");
       return;
     }
+    const q = convertToItemUnit(raw, useUnit, selected.unit);
     const entry: Omit<CountEntry, "id"> = {
       stocktake_id: stocktake.id!,
       item_id: selected.id!,
@@ -111,18 +128,23 @@ export default function CountPage() {
         : mode === "add"
           ? "足す"
           : "なし";
-    showToast(
-      `${selected.name} を ${fmtQty(q, selected.is_weight)}${selected.unit}で${label}`,
-    );
+    const stored = `${fmtQty(q, selected.is_weight)}${selected.unit}`;
+    const entered =
+      useUnit !== selected.unit
+        ? `（入力：${raw}${useUnit} → ${stored}）`
+        : "";
+    showToast(`${selected.name} を ${stored}で${label}${entered}`);
     setSelected(null);
     setQuery("");
     setQtyInput("");
+    setInputUnit(null);
     setTimeout(() => searchRef.current?.focus(), 50);
   }
 
   function pickItem(it: Item) {
     setSelected(it);
     setQtyInput("");
+    setInputUnit(it.unit);
   }
 
   function pickFromRecent(e: CountEntry) {
@@ -270,11 +292,44 @@ export default function CountPage() {
             </button>
           </div>
 
+          {altUnit(selected.unit) && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => setInputUnit(selected.unit)}
+                className={`flex-1 py-2 rounded border ${
+                  (inputUnit ?? selected.unit) === selected.unit
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white"
+                }`}
+              >
+                {selected.unit}で入れる
+              </button>
+              <button
+                onClick={() => setInputUnit(altUnit(selected.unit)!)}
+                className={`flex-1 py-2 rounded border ${
+                  (inputUnit ?? selected.unit) === altUnit(selected.unit)
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white"
+                }`}
+              >
+                {altUnit(selected.unit)}で入れる
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <input
               type="number"
-              inputMode={selected.is_weight ? "decimal" : "numeric"}
-              step={selected.is_weight ? "0.01" : "1"}
+              inputMode={
+                selected.is_weight || (inputUnit ?? selected.unit) === "kg"
+                  ? "decimal"
+                  : "numeric"
+              }
+              step={
+                selected.is_weight || (inputUnit ?? selected.unit) === "kg"
+                  ? "0.01"
+                  : "1"
+              }
               min={0}
               value={qtyInput}
               onChange={(e) => setQtyInput(e.target.value)}
@@ -283,11 +338,22 @@ export default function CountPage() {
               autoFocus
             />
             <div className="text-2xl font-semibold w-16 text-center">
-              {selected.unit}
+              {inputUnit ?? selected.unit}
             </div>
           </div>
+          {inputUnit && inputUnit !== selected.unit && qtyInput && (
+            <div className="text-xs text-gray-500 text-right">
+              保存：
+              {convertToItemUnit(
+                Number(qtyInput) || 0,
+                inputUnit,
+                selected.unit,
+              ).toFixed(selected.is_weight ? 2 : 0)}
+              {selected.unit}
+            </div>
+          )}
 
-          {!selected.is_weight && (
+          {!selected.is_weight && (inputUnit ?? selected.unit) !== "kg" && (
             <div className="grid grid-cols-5 gap-2">
               {[-1, +1, +5, +10].map((d) => (
                 <button

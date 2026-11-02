@@ -2,20 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, userName, setUserName } from "@/lib/db";
+import { db, getMembers, setUserName, userName } from "@/lib/db";
 
 export default function StatusBar() {
   const [online, setOnline] = useState(true);
   const [name, setName] = useState("");
-  const [editingName, setEditingName] = useState(false);
+  const [members, setMembers] = useState<string[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [freeInput, setFreeInput] = useState(false);
+  const [draft, setDraft] = useState("");
   const unsynced = useLiveQuery(() =>
     db.count_entries.filter((e) => !e.synced_at).count(),
   );
 
+  async function reloadMembers() {
+    const m = await getMembers();
+    setMembers(m);
+  }
+
   useEffect(() => {
     setOnline(navigator.onLine);
-    setName(userName());
-    if (!userName()) setEditingName(true);
+    const current = userName();
+    setName(current);
+    reloadMembers();
+    if (!current) setEditing(true);
     const on = () => setOnline(true);
     const off = () => setOnline(false);
     window.addEventListener("online", on);
@@ -26,11 +36,23 @@ export default function StatusBar() {
     };
   }, []);
 
-  function save() {
-    const n = name.trim();
-    if (!n) return;
+  function pick(n: string) {
     setUserName(n);
-    setEditingName(false);
+    setName(n);
+    setEditing(false);
+    setFreeInput(false);
+    setDraft("");
+  }
+
+  function saveFree() {
+    const n = draft.trim();
+    if (!n) return;
+    pick(n);
+  }
+
+  function open() {
+    reloadMembers();
+    setEditing(true);
   }
 
   return (
@@ -46,27 +68,66 @@ export default function StatusBar() {
           / 未送信 <b>{unsynced ?? 0}</b> 件
         </span>
       </div>
-      <div>
-        {editingName ? (
-          <div className="flex gap-1">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="border rounded px-2 py-1 w-24"
-              placeholder="名前"
-            />
+      <div className="relative">
+        {editing ? (
+          <div className="absolute right-0 top-0 bg-white border rounded-lg shadow-lg p-2 flex flex-col gap-1 min-w-[180px] z-20">
+            <div className="text-xs text-gray-500 px-1">名前を選ぶ</div>
+            {members.length === 0 && (
+              <div className="text-xs text-gray-500 px-1">
+                登録なし。設定で追加できます。
+              </div>
+            )}
+            {members.map((n) => (
+              <button
+                key={n}
+                onClick={() => pick(n)}
+                className={`text-left px-2 py-2 rounded hover:bg-gray-100 ${
+                  n === name ? "bg-blue-50" : ""
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+            <div className="border-t my-1" />
+            {freeInput ? (
+              <div className="flex gap-1">
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="border rounded px-2 py-1 flex-1"
+                  placeholder="名前"
+                />
+                <button
+                  onClick={saveFree}
+                  className="bg-blue-600 text-white px-2 py-1 rounded"
+                >
+                  OK
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => {
+                  setFreeInput(true);
+                  setDraft("");
+                }}
+                className="text-left px-2 py-2 rounded text-blue-700"
+              >
+                一覧にない名前を入れる
+              </button>
+            )}
             <button
-              onClick={save}
-              className="bg-blue-600 text-white px-2 py-1 rounded"
+              onClick={() => {
+                setEditing(false);
+                setFreeInput(false);
+              }}
+              className="text-xs text-gray-500 text-right px-1"
             >
-              保存
+              閉じる
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => setEditingName(true)}
-            className="underline text-blue-700"
-          >
+          <button onClick={open} className="underline text-blue-700">
             {name || "名前を入れる"}
           </button>
         )}
