@@ -177,7 +177,7 @@ export default function StatusBar() {
   }
 
   return (
-    <div className="sticky top-0 z-10 bg-white border-b flex items-center justify-between gap-2 px-3 py-3 text-base">
+    <div className="sticky top-0 z-10 bg-white border-b flex items-center justify-between gap-2 px-3 py-3 text-base print:hidden">
       <div className="flex items-center gap-2 flex-wrap">
         <span
           className={`inline-block w-3.5 h-3.5 rounded-full ${

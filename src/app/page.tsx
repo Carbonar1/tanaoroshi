@@ -44,6 +44,13 @@ export default function Home() {
         </Link>
       </nav>
 
+      <Link
+        href="/help"
+        className="mt-2 block rounded-lg bg-sky-100 text-sky-900 text-center py-3 text-base font-semibold border-2 border-sky-300"
+      >
+        📖 このアプリの使い方（はじめての方へ）
+      </Link>
+
       <h2 className="text-sm font-semibold mt-4 text-gray-700">管理</h2>
       <nav className="grid grid-cols-2 gap-3">
         <Link
