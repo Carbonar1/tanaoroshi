@@ -385,10 +385,3 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
   return result;
 }
 
-export async function unsyncedCount(stocktakeId: number): Promise<number> {
-  return db.count_entries
-    .where("stocktake_id")
-    .equals(stocktakeId)
-    .filter((e) => !e.synced_at)
-    .count();
-}

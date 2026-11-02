@@ -28,6 +28,12 @@ export default function Home() {
           見直し（Claude）
         </Link>
         <Link
+          href="/labels"
+          className="block rounded-lg bg-amber-600 text-white text-center py-5 text-xl font-semibold shadow"
+        >
+          段ボールのラベル写真
+        </Link>
+        <Link
           href="/export"
           className="block rounded-lg bg-emerald-600 text-white text-center py-5 text-xl font-semibold shadow"
         >
@@ -60,6 +66,12 @@ export default function Home() {
           className="block rounded-lg bg-white border text-center py-4 text-lg shadow-sm"
         >
           用紙を撮って登録
+        </Link>
+        <Link
+          href="/month"
+          className="block rounded-lg bg-white border text-center py-4 text-lg shadow-sm"
+        >
+          今月の品目
         </Link>
         <Link
           href="/settings"

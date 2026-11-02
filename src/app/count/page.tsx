@@ -16,22 +16,10 @@ import {
   userName,
 } from "@/lib/db";
 import { normalize } from "@/lib/search";
+import { altUnit, convertToItemUnit } from "@/lib/units";
 
 function fmtQty(q: number, isWeight: 0 | 1): string {
   return isWeight ? q.toFixed(2) : String(q);
-}
-
-function altUnit(u: Unit): Unit | null {
-  if (u === "kg") return "g";
-  if (u === "g") return "kg";
-  return null;
-}
-
-function convertToItemUnit(value: number, from: Unit, to: Unit): number {
-  if (from === to) return value;
-  if (from === "g" && to === "kg") return value / 1000;
-  if (from === "kg" && to === "g") return value * 1000;
-  return value;
 }
 
 export default function CountPage() {
@@ -112,16 +100,27 @@ export default function CountPage() {
     return picks;
   }, [items, prevMonthOrder, recent]);
 
+  const normIndex = useMemo(() => {
+    if (!items) return [] as { it: Item; r: string; n: string }[];
+    return items.map((it) => ({
+      it,
+      r: normalize(it.reading),
+      n: normalize(it.name),
+    }));
+  }, [items]);
+
   const candidates = useMemo(() => {
     const q = normalize(query);
-    if (!q || !items) return [];
-    return items
-      .filter(
-        (it) =>
-          normalize(it.reading).includes(q) || normalize(it.name).includes(q),
-      )
-      .slice(0, 5);
-  }, [items, query]);
+    if (!q) return [];
+    const out: Item[] = [];
+    for (const x of normIndex) {
+      if (x.r.includes(q) || x.n.includes(q)) {
+        out.push(x.it);
+        if (out.length >= 5) break;
+      }
+    }
+    return out;
+  }, [normIndex, query]);
 
   const selectedTotal = useLiveQuery(
     async () => {

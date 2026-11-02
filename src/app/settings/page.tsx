@@ -10,8 +10,13 @@ import {
   setActiveStocktake,
   getMembers,
   setMembers,
+  deviceId,
+  newClientUid,
+  userName,
   Stocktake,
+  Unit,
 } from "@/lib/db";
+import { DEMO_ITEMS } from "@/lib/demoData";
 
 export default function SettingsPage() {
   const [stocktake, setStocktake] = useState<Stocktake | null>(null);
@@ -81,6 +86,84 @@ export default function SettingsPage() {
     const next = members.filter((x) => x !== name);
     await setMembers(next);
     setMembersState(next);
+  }
+
+  async function seedDemo() {
+    if (
+      !confirm(
+        "デモ用の棚卸し（月：DEMO）を作ります。架空の業者・品目と、わざと間違いを含んだ今月の入力を一括で入れます。本番データとは別の月になります。実行しますか？",
+      )
+    )
+      return;
+    const demoMonth = "DEMO";
+    const demoSt = await createStocktake(demoMonth);
+    await setActiveStocktake(demoSt.id!);
+
+    const suppliers = await db.suppliers.toArray();
+    const supplierMap = new Map<string, number>();
+    suppliers.forEach((s) => supplierMap.set(s.name, s.id!));
+    let order = suppliers.length;
+
+    const dev = deviceId();
+    for (const d of DEMO_ITEMS) {
+      let sid = supplierMap.get(d.supplier);
+      if (sid == null) {
+        order += 1;
+        sid = await db.suppliers.add({
+          name: d.supplier,
+          sort_order: order,
+        });
+        supplierMap.set(d.supplier, sid);
+      }
+      const existing = await db.items
+        .where({ supplier_id: sid, name: d.name })
+        .first();
+      const payload = {
+        name: d.name,
+        reading: d.reading,
+        supplier_id: sid,
+        sheet_order: d.sheet_order,
+        unit: d.unit as Unit,
+        is_weight: d.is_weight,
+        unit_price: d.unit_price,
+        last_month_qty: d.last_month_qty,
+        active: 1 as const,
+        is_provisional: 0 as const,
+      };
+      let itemId: number;
+      if (existing) {
+        itemId = existing.id!;
+        await db.items.update(itemId, payload);
+      } else {
+        itemId = await db.items.add(payload);
+      }
+      if (d.demo_qty != null) {
+        await db.count_entries.add({
+          client_uid: newClientUid(dev),
+          stocktake_id: demoSt.id!,
+          item_id: itemId,
+          qty: d.demo_qty,
+          mode: "set",
+          counted_by: userName() || "デモ",
+          device_id: dev,
+          counted_at: Date.now(),
+        });
+      }
+    }
+    alert("デモデータを入れました。月は DEMO に切り替えました。");
+    reload();
+  }
+
+  async function clearDemo() {
+    const demo = await db.stocktakes.where("month").equals("DEMO").first();
+    if (!demo) {
+      alert("DEMO はありません。");
+      return;
+    }
+    if (!confirm("DEMO 月の入力記録と棚卸しを消しますか？品目・発注先は残ります。")) return;
+    await db.count_entries.where("stocktake_id").equals(demo.id!).delete();
+    await db.stocktakes.delete(demo.id!);
+    reload();
   }
 
   async function resetEntries() {
@@ -229,6 +312,25 @@ export default function SettingsPage() {
             </button>
           </div>
         ))}
+      </section>
+
+      <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">
+        <h2 className="text-lg font-semibold">デモ用（本番とは別）</h2>
+        <div className="text-sm text-gray-600">
+          架空の業者と品目で、わざと間違いを含んだ入力を一括で作ります。デモ月（DEMO）に入るので、本番の月とは混ざりません。
+        </div>
+        <button
+          onClick={seedDemo}
+          className="bg-purple-600 text-white rounded py-3 text-base font-semibold"
+        >
+          デモ用の今月入力を作る
+        </button>
+        <button
+          onClick={clearDemo}
+          className="bg-gray-200 rounded py-2 text-sm"
+        >
+          デモ月を消す
+        </button>
       </section>
 
       <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">

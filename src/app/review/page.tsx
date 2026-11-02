@@ -11,6 +11,7 @@ import {
   ensureCurrentStocktake,
 } from "@/lib/db";
 import { Finding, Severity, detectFindings } from "@/lib/findings";
+import { humanize } from "@/lib/humanError";
 
 const SEV_LABEL: Record<Severity, string> = {
   high: "要確認",
@@ -154,7 +155,7 @@ export default function ReviewPage() {
       });
       setAiNotes(map);
     } catch (e) {
-      setAiError(e instanceof Error ? e.message : String(e));
+      setAiError(humanize(e));
     } finally {
       setAiLoading(false);
     }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/db";
 import { hasSupabase } from "@/lib/supabase";
 import { syncNow } from "@/lib/sync";
+import { humanize } from "@/lib/humanError";
 
 export default function StatusBar() {
   const [online, setOnline] = useState(true);
@@ -42,14 +43,14 @@ export default function StatusBar() {
       const st = await ensureCurrentStocktake();
       const r = await syncNow(st);
       if (r.errors.length > 0) {
-        setSyncMsg(`エラー：${r.errors[0]}`);
+        setSyncMsg(humanize(r.errors[0]));
       } else {
         setSyncMsg(
           `送信${r.pushedEntries}・受信${r.pulledEntries}・品目${r.pulledItems + r.pushedItems}`,
         );
       }
     } catch (e) {
-      setSyncMsg(`エラー：${(e as Error).message}`);
+      setSyncMsg(humanize(e));
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMsg(""), 4000);

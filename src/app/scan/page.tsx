@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Unit, UNITS, db } from "@/lib/db";
+import { humanize } from "@/lib/humanError";
 
 type ScannedItem = {
   name: string;
@@ -115,7 +116,7 @@ export default function ScanPage() {
       }));
       setDrafts(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(humanize(e));
     } finally {
       setLoading(false);
     }
@@ -206,7 +207,7 @@ export default function ScanPage() {
       setFiles([]);
       setPreviews([]);
     } catch (e) {
-      setResult(`エラー：${(e as Error).message}`);
+      setResult(`エラー：${humanize(e)}`);
     } finally {
       setRegistering(false);
     }

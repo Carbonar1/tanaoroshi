@@ -77,12 +77,25 @@ export interface Setting {
   value: string;
 }
 
+export interface LabelPhoto {
+  id?: number;
+  stocktake_id: number;
+  blob: Blob;
+  mime: string;
+  status: "pending" | "read" | "registered";
+  result_json?: string;
+  item_id?: number;
+  taken_at: number;
+  note?: string;
+}
+
 class TanaoroshiDB extends Dexie {
   suppliers!: Table<Supplier, number>;
   items!: Table<Item, number>;
   stocktakes!: Table<Stocktake, number>;
   count_entries!: Table<CountEntry, number>;
   settings!: Table<Setting, string>;
+  label_photos!: Table<LabelPhoto, number>;
 
   constructor() {
     super("tanaoroshi");
@@ -117,6 +130,15 @@ class TanaoroshiDB extends Dexie {
             }
           });
       });
+    this.version(4).stores({
+      suppliers: "++id, name, sort_order",
+      items: "++id, name, reading, supplier_id, sheet_order, active",
+      stocktakes: "++id, month, status",
+      count_entries:
+        "++id, &client_uid, stocktake_id, item_id, counted_at, synced_at, [stocktake_id+item_id]",
+      settings: "key",
+      label_photos: "++id, stocktake_id, status, taken_at",
+    });
   }
 }
 
