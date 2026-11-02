@@ -365,7 +365,7 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     return result;
   }
   if (syncing) {
-    result.errors.push("同期中です。");
+    result.errors.push("送信中です。");
     return result;
   }
   syncing = true;
