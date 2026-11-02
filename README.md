@@ -4,6 +4,67 @@
 
 Built with Claude: Japan 2026（Anthropic 公式ハッカソン）応募作品。
 
+## 全体像
+
+```mermaid
+flowchart LR
+  subgraph Phone["スマホ（PWA・画面すべて日本語）"]
+    UI["画面<br/>（棚卸し入力・見直し・集計）"]
+    IDB["IndexedDB<br/>（Dexie v5）"]
+    SW["Service Worker<br/>（全画面を事前キャッシュ）"]
+  end
+  subgraph Server["サーバー側（Next.js API ルート）"]
+    Review["POST /api/review<br/>見直しコメント生成"]
+    Scan["POST /api/items/scan<br/>用紙写真の品目抽出"]
+    Labels["POST /api/labels/scan<br/>段ボール写真の品目照合"]
+    Readings["POST /api/items/readings<br/>品名の読みを生成"]
+  end
+  Supa["Supabase (Postgres)<br/>全端末の記録を合算"]
+  Claude["Claude API<br/>Haiku 4.5 / Sonnet 4.6"]
+
+  UI --> IDB
+  SW -. 保管庫内 .-> UI
+  IDB <-- 電波あり時 --> Supa
+  UI --> Review
+  UI --> Scan
+  UI --> Labels
+  UI --> Readings
+  Review --> Claude
+  Scan --> Claude
+  Labels --> Claude
+  Readings --> Claude
+```
+
+## 現場での流れ
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant 中 as 保管庫の中の人
+  participant 外 as 外（厨房）の人
+  participant App as このアプリ
+  participant Supa as Supabase
+
+  rect rgb(230,240,255)
+  Note over 中,App: 保管庫（電波なし）
+  中->>App: 「みそ」と検索
+  App->>App: IndexedDB の品目から候補を出す
+  中->>App: 5kg 「決定」
+  Note right of App: 1 件ずつ IndexedDB に保存
+  外->>App: 同じ品目を別の場所で 2kg 「足す」
+  App->>App: 最後の set 以降の add を加算
+  end
+
+  rect rgb(230,255,230)
+  Note over App,Supa: 厨房に戻る（電波あり）
+  App->>Supa: 未送信の count_entries を upsert
+  Note right of App: client_uid で二重登録を防止
+  Supa-->>App: 他端末の記録も取り込み
+  App->>Claude: 要確認の指摘にコメント要求
+  Claude-->>App: 「0 を 1 つ多い可能性」など
+  end
+```
+
 ---
 
 ## 解決したい課題
@@ -58,11 +119,22 @@ Claude の応答は JSON で受け取り、人が確認してから反映する�
 ## 保管庫で動かすしくみ
 
 - 入力データは**端末の中（IndexedDB）に 1 件ずつ保存**。送信はあとで
-- 画面は PWA 化。一度開けば電波がなくても表示できる
+- 画面は PWA 化。**Service Worker のインストール時に全画面の HTML と参照する JS/CSS を一括でキャッシュ**するので、一度も開いていない画面でも電波なしで開ける
 - 画面上部に「電波あり／なし」と「未送信 N 件」を常に表示
 - 電波が戻ると自動で送信、Supabase 側で全員分を合算
 - 送信済みレコードは `client_uid` で二重登録を防止
 - 同じ品目が複数人・複数台で入ってきた場合は「決定」と「足す」の合計規則で判定（最後の set 以降の add の和）
+- 発注先・品目は `upsert(onConflict=name)` / `upsert(onConflict=supplier_id,name)` で送るので、**何台から何回送っても重複エラーにならない**
+- 入力記録は 1 件ずつ送るので、1 件が失敗しても他は送られ、失敗分は次回自動で再送される
+
+## データの守り方と、今の限界
+
+- Supabase の anon キーは画面側に出るが、`.env.local` と Vercel の環境変数で管理し、ログインを作らない前提の運用（現場利用者のみが URL を知る）
+- Claude API キーは**サーバー側（Next.js API ルート）だけ**で使い、画面側コードや GitHub に出さない
+- 用紙写真・ラベル写真は端末内（IndexedDB）に保存し、Claude には画像のみ送って保存はしない
+- **ログインが無いため、URL とキーが漏れた場合は誰でも書き込めてしまう**（審査提出時点の限界）。本番運用には、Supabase Auth ＋ RLS ポリシーの導入が別途必要
+- IndexedDB は端末単位のため、端末を替えるときは設定の「書き出す／読み込む」でバックアップを使う
+- 実在の取引先名・商品名は含めない。デモデータは架空（`src/lib/demoData.ts`）
 
 ## 技術構成
 
