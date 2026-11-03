@@ -317,7 +317,7 @@ export default function StatusBar() {
         ) : (
           <button
             onClick={open}
-            className="underline text-blue-700 font-semibold text-base px-2 py-1"
+            className="underline text-blue-700 font-semibold text-base px-2 py-1 whitespace-nowrap max-w-[7.5rem] overflow-hidden text-ellipsis"
           >
             {name || "名前を入れる"}
           </button>

@@ -23,29 +23,8 @@ export function detectFindings(
     const qty = qtyByItem.get(it.id!) ?? null;
     const last = it.last_month_qty;
 
-    if (qty != null && qty > 0 && last != null && last > 0) {
-      const ratio = qty / last;
-      if (ratio >= 10) {
-        list.push({
-          id: `big-${it.id}`,
-          item: it,
-          severity: "high",
-          title: `${it.name}：先月の ${ratio.toFixed(1)} 倍`,
-          reason: `今月 ${qty}${it.unit} に対し先月は ${last}${it.unit}。0 を 1 つ多く入れた可能性があります。`,
-          suggestion: `単位（${it.unit}）と桁を見直してください。`,
-        });
-      } else if (ratio <= 0.1) {
-        list.push({
-          id: `small-${it.id}`,
-          item: it,
-          severity: "high",
-          title: `${it.name}：先月の ${(ratio * 100).toFixed(0)}%`,
-          reason: `今月 ${qty}${it.unit} に対し先月は ${last}${it.unit}。桁や小数点の打ち間違いの可能性があります。`,
-          suggestion: `もう一度数え直すか、入力を直してください。`,
-        });
-      }
-    }
-
+    // 先に kg/g 取り違えを判定し、該当する場合は前月比の指摘を抑制する
+    let kgGMix = false;
     if (
       it.is_weight === 1 &&
       qty != null &&
@@ -55,6 +34,7 @@ export function detectFindings(
     ) {
       const r = qty / last;
       if (r >= 900 && r <= 1100) {
+        kgGMix = true;
         list.push({
           id: `kg-g-x1000-${it.id}`,
           item: it,
@@ -64,6 +44,7 @@ export function detectFindings(
           suggestion: `入力画面の「g で入れる／kg で入れる」切り替えを使って入れ直してください。`,
         });
       } else if (r >= 1 / 1100 && r <= 1 / 900) {
+        kgGMix = true;
         list.push({
           id: `kg-g-d1000-${it.id}`,
           item: it,
@@ -71,6 +52,39 @@ export function detectFindings(
           title: `${it.name}：kg と g の取り違えかも`,
           reason: `今月 ${qty}${it.unit} は先月 ${last}${it.unit} の約 1/1000。kg を g として入れた可能性があります。`,
           suggestion: `入力画面で単位を切り替えて入れ直してください。`,
+        });
+      }
+    }
+
+    if (!kgGMix && qty != null && qty > 0 && last != null && last > 0) {
+      const ratio = qty / last;
+      if (ratio >= 10) {
+        const zeros = Math.round(Math.log10(ratio));
+        const zeroPhrase =
+          zeros >= 2
+            ? `0 を ${zeros} つ多く入れた可能性があります。`
+            : `0 を 1 つ多く入れた可能性があります。`;
+        list.push({
+          id: `big-${it.id}`,
+          item: it,
+          severity: "high",
+          title: `${it.name}：先月の ${ratio.toFixed(1)} 倍`,
+          reason: `今月 ${qty}${it.unit} に対し先月は ${last}${it.unit}。${zeroPhrase}`,
+          suggestion: `単位（${it.unit}）と桁を見直してください。`,
+        });
+      } else if (ratio <= 0.1) {
+        const zeros = Math.round(-Math.log10(ratio));
+        const zeroPhrase =
+          zeros >= 2
+            ? `0 を ${zeros} つ少なく入れた、または桁を落とした可能性があります。`
+            : `0 を 1 つ少なく入れた可能性があります。`;
+        list.push({
+          id: `small-${it.id}`,
+          item: it,
+          severity: "high",
+          title: `${it.name}：先月の ${(ratio * 100).toFixed(0)}%`,
+          reason: `今月 ${qty}${it.unit} に対し先月は ${last}${it.unit}。${zeroPhrase}`,
+          suggestion: `もう一度数え直すか、入力を直してください。`,
         });
       }
     }

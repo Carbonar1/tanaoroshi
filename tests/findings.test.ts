@@ -150,4 +150,56 @@ describe("detectFindings", () => {
     const f = detectFindings([it], new Map(), qty);
     expect(f.find((x) => x.id === "miss-8")).toBeFalsy();
   });
+
+  it("kg/g 取り違えと判定したら前月比の big を出さない", () => {
+    const it = makeItem({
+      id: 30,
+      name: "片栗粉",
+      unit: "kg",
+      is_weight: 1,
+      last_month_qty: 1.5,
+    });
+    const qty = new Map<number, number | null>([[30, 1500]]);
+    const f = detectFindings([it], new Map(), qty);
+    expect(f.find((x) => x.id === "kg-g-x1000-30")).toBeTruthy();
+    expect(f.find((x) => x.id === "big-30")).toBeFalsy();
+  });
+
+  it("kg→g 取り違えと判定したら前月比の small を出さない", () => {
+    const it = makeItem({
+      id: 31,
+      name: "味噌",
+      unit: "kg",
+      is_weight: 1,
+      last_month_qty: 1500,
+    });
+    const qty = new Map<number, number | null>([[31, 1.5]]);
+    const f = detectFindings([it], new Map(), qty);
+    expect(f.find((x) => x.id === "kg-g-d1000-31")).toBeTruthy();
+    expect(f.find((x) => x.id === "small-31")).toBeFalsy();
+  });
+
+  it("前月比10倍前後の説明文は『0 を 1 つ多く』", () => {
+    const it = makeItem({ id: 32, name: "砂糖", unit: "kg", last_month_qty: 11 });
+    const qty = new Map<number, number | null>([[32, 110]]);
+    const f = detectFindings([it], new Map(), qty);
+    const r = f.find((x) => x.id === "big-32")!;
+    expect(r.reason).toMatch(/0 を 1 つ多く/);
+  });
+
+  it("前月比100倍前後の説明文は『0 を 2 つ多く』", () => {
+    const it = makeItem({ id: 33, name: "砂糖", unit: "kg", last_month_qty: 10 });
+    const qty = new Map<number, number | null>([[33, 1000]]);
+    const f = detectFindings([it], new Map(), qty);
+    const r = f.find((x) => x.id === "big-33")!;
+    expect(r.reason).toMatch(/0 を 2 つ多く/);
+  });
+
+  it("前月比1000倍前後（非重さ）の説明文は『0 を 3 つ多く』", () => {
+    const it = makeItem({ id: 34, name: "缶詰", unit: "缶", last_month_qty: 2 });
+    const qty = new Map<number, number | null>([[34, 2000]]);
+    const f = detectFindings([it], new Map(), qty);
+    const r = f.find((x) => x.id === "big-34")!;
+    expect(r.reason).toMatch(/0 を 3 つ多く/);
+  });
 });
