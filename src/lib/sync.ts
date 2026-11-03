@@ -400,22 +400,53 @@ async function pullEntries(
   }
 }
 
-// 名前の一覧：名前で突き合わせ、updated_at が新しい方を正にする
+// 名前の一覧：Last-Write-Wins by updated_at
+// 1. サーバーの現状を取得
+// 2. 新規／変更したローカルのみ送る（サーバー側の updated_at が新しいものは送らない）
+// 3. サーバーの最新をローカルに適用
 async function syncMembers(result: SyncResult): Promise<void> {
   const sb = supabase();
   if (!sb) return;
 
   const locals = await db.members.toArray();
 
-  // 1. ローカルの名前をまとめて upsert（名前で突き合わせ）
-  if (locals.length > 0) {
-    const payload = dedupePayload(
-      locals.map((l) => ({
-        name: l.name,
-        active: l.active === 1,
-      })),
-      ["name"],
-    );
+  // 1. サーバーの現状を取得
+  const { data: remote, error: fetchErr } = await sb
+    .from("members")
+    .select("id, name, active, updated_at");
+  if (fetchErr) {
+    result.errors.push(`名前の取得：${humanize(fetchErr.message)}`);
+    return;
+  }
+  const remoteByName = new Map<
+    string,
+    { active: boolean; updated_at: number }
+  >();
+  for (const r of (remote ?? []) as Array<{
+    name: string;
+    active: boolean;
+    updated_at: string;
+  }>) {
+    remoteByName.set(r.name, {
+      active: r.active,
+      updated_at: new Date(r.updated_at).getTime(),
+    });
+  }
+
+  // 2. ローカルの中で、サーバーに無い or ローカル updated_at がサーバーより新しいものだけ送る
+  const toPush: Array<{ name: string; active: boolean }> = [];
+  for (const l of locals) {
+    const r = remoteByName.get(l.name);
+    if (!r) {
+      toPush.push({ name: l.name, active: l.active === 1 });
+      continue;
+    }
+    if (l.updated_at > r.updated_at && (l.active === 1) !== r.active) {
+      toPush.push({ name: l.name, active: l.active === 1 });
+    }
+  }
+  if (toPush.length > 0) {
+    const payload = dedupePayload(toPush, ["name"]);
     const { data, error } = await sb
       .from("members")
       .upsert(payload, { onConflict: "name" })
@@ -424,41 +455,40 @@ async function syncMembers(result: SyncResult): Promise<void> {
       result.errors.push(`名前の送信：${humanize(error.message)}`);
     } else {
       result.pushedMembers += data?.length ?? 0;
+      // サーバーが時刻を返してきたら、ローカルにも反映
+      for (const r of (data ?? []) as Array<{
+        name: string;
+        active: boolean;
+        updated_at: string;
+      }>) {
+        remoteByName.set(r.name, {
+          active: r.active,
+          updated_at: new Date(r.updated_at).getTime(),
+        });
+      }
     }
   }
 
-  // 2. サーバーの一覧を取得して、ローカルに適用
-  const { data: remote, error } = await sb
-    .from("members")
-    .select("id, name, active, updated_at");
-  if (error) {
-    result.errors.push(`名前の取得：${humanize(error.message)}`);
-    return;
-  }
+  // 3. サーバーの最新をローカルに適用
   const localByName = new Map<string, Member>();
   locals.forEach((l) => localByName.set(l.name, l));
-  for (const r of (remote ?? []) as Array<{
-    name: string;
-    active: boolean;
-    updated_at: string;
-  }>) {
-    const serverTime = new Date(r.updated_at).getTime();
-    const activeNum: 0 | 1 = r.active ? 1 : 0;
-    const existing = localByName.get(r.name);
+  for (const [name, srv] of remoteByName) {
+    const activeNum: 0 | 1 = srv.active ? 1 : 0;
+    const existing = localByName.get(name);
     if (!existing) {
       await db.members.add({
-        name: r.name,
+        name,
         active: activeNum,
-        updated_at: serverTime,
+        updated_at: srv.updated_at,
       });
       result.pulledMembers += 1;
     } else if (
-      existing.updated_at < serverTime ||
-      existing.active !== activeNum
+      srv.updated_at > existing.updated_at &&
+      (existing.active !== activeNum || existing.updated_at < srv.updated_at)
     ) {
       await db.members.update(existing.id!, {
         active: activeNum,
-        updated_at: serverTime,
+        updated_at: srv.updated_at,
       });
       result.pulledMembers += 1;
     }
