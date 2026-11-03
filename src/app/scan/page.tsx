@@ -11,6 +11,7 @@ type ScannedItem = {
   name: string;
   unit: string;
   reading: string;
+  needs_check?: boolean;
   last_month_qty: number | null;
   sheet_order: number;
 };
@@ -26,6 +27,7 @@ type DraftItem = {
   name: string;
   unit: Unit;
   reading: string;
+  needs_check: boolean;
   last_month_qty: string;
   sheet_order: number;
 };
@@ -149,6 +151,7 @@ export default function ScanPage() {
           name: it.name ?? "",
           unit: toUnit(it.unit),
           reading: it.reading ?? "",
+          needs_check: Boolean(it.needs_check),
           last_month_qty:
             it.last_month_qty == null ? "" : String(it.last_month_qty),
           sheet_order: it.sheet_order ?? ii + 1,
@@ -453,18 +456,36 @@ export default function ScanPage() {
                       />
                     </label>
 
-                    <label className="flex flex-col gap-1">
-                      <span className="text-sm text-gray-700">
-                        読み（ひらがな）
+                    <label
+                      className={`flex flex-col gap-1 ${
+                        it.needs_check
+                          ? "bg-amber-50 border-2 border-amber-400 rounded-lg px-2 py-2"
+                          : ""
+                      }`}
+                    >
+                      <span
+                        className={`text-sm ${
+                          it.needs_check ? "text-amber-900 font-bold" : "text-gray-700"
+                        }`}
+                      >
+                        {it.needs_check
+                          ? "⚠ 読みを確認してください"
+                          : "読み（ひらがな）"}
                       </span>
                       <input
                         value={it.reading}
                         onChange={(e) =>
                           updateItem(s.key, it.key, {
                             reading: e.target.value,
+                            // 人が直したら「要確認」を外す
+                            needs_check: false,
                           })
                         }
-                        className="border rounded-lg px-3 py-2 text-base w-full"
+                        className={`border rounded-lg px-3 py-2 text-base w-full ${
+                          it.needs_check
+                            ? "border-amber-500 bg-white"
+                            : ""
+                        }`}
                       />
                     </label>
 

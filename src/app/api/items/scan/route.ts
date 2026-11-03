@@ -16,12 +16,19 @@ const SYSTEM = `あなたは飲食店の棚卸し用紙（手書きあり）を�
 - items: 品目一覧
   - name: 品名
   - unit: 単位（箱／缶／本／P／kg／g／cs／枚／尾／コ のいずれか。不明なら最も近いものを選ぶ）
-  - reading: ひらがなの読み（例：「濃口醤油」→「こいくちしょうゆ」）
+  - reading: ひらがなの読み。**調理場で実際に使われる一般的な読み方にすること**。例：
+    - 「濃口醤油」→「こいくちしょうゆ」
+    - 「田舎味噌」→「いなかみそ」
+    - 「本みりん」→「ほんみりん」
+    - 「片栗粉」→「かたくりこ」
+    - 「鶏がらだし」→「とりがらだし」
+    - 読み方に自信が無いときは、素直な音読みより訓読みや慣用読みを優先する
+  - needs_check: 読みに自信が無い（複数の読みがあり得る、人名風の読み、業界固有の呼び名の可能性）の場合は true、確実なら false
   - last_month_qty: 用紙に書かれている先月の数量。空欄は 0 として、未記入のものは null にする
   - sheet_order: 用紙上の行番号（1 から）
 
 次の JSON のみを返してください。前後に説明を書かず、JSON ブロック 1 つだけ：
-{"suppliers":[{"supplier_name":"〇〇食品","items":[{"name":"濃口醤油","unit":"箱","reading":"こいくちしょうゆ","last_month_qty":7,"sheet_order":1}]}]}`;
+{"suppliers":[{"supplier_name":"〇〇食品","items":[{"name":"濃口醤油","unit":"箱","reading":"こいくちしょうゆ","needs_check":false,"last_month_qty":7,"sheet_order":1}]}]}`;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
