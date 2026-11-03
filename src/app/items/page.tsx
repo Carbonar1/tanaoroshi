@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, Item, Unit, UNITS } from "@/lib/db";
@@ -72,9 +72,11 @@ export default function ItemsPage() {
   }, [items, filterSupplier, search, supplierMap]);
 
   const dlg = useDialog();
+  const composingRef = useRef(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (composingRef.current) return;
     if (!form.name.trim() || !form.reading.trim() || form.supplier_id === "") {
       dlg.info(
         "入れていない項目があります",
@@ -278,6 +280,8 @@ export default function ItemsPage() {
             type="text"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
+            onCompositionStart={() => (composingRef.current = true)}
+            onCompositionEnd={() => (composingRef.current = false)}
             className="border rounded px-3 py-3 text-lg"
             placeholder="例：濃口醤油"
             required
@@ -290,6 +294,8 @@ export default function ItemsPage() {
             type="text"
             value={form.reading}
             onChange={(e) => setForm({ ...form, reading: e.target.value })}
+            onCompositionStart={() => (composingRef.current = true)}
+            onCompositionEnd={() => (composingRef.current = false)}
             className="border rounded px-3 py-3 text-lg"
             placeholder="例：こいくちしょうゆ"
             required

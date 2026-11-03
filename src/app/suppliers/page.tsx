@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, Supplier } from "@/lib/db";
@@ -13,9 +13,12 @@ export default function SuppliersPage() {
   const [name, setName] = useState("");
   const [sortOrder, setSortOrder] = useState<number | "">("");
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Safari の IME 変換中に Enter で誤って submit するのを防ぐ
+  const composingRef = useRef(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (composingRef.current) return;
     const trimmed = name.trim();
     if (!trimmed) return;
     const order =
@@ -79,6 +82,8 @@ export default function SuppliersPage() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onCompositionStart={() => (composingRef.current = true)}
+            onCompositionEnd={() => (composingRef.current = false)}
             className="border rounded px-3 py-3 text-lg"
             placeholder="例：〇〇食品"
             required
