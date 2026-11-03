@@ -256,25 +256,37 @@ export default function LabelsPage() {
       </p>
 
       <section className="bg-white rounded shadow p-4 flex flex-col gap-3">
-        <label className="bg-blue-600 text-white rounded-lg py-4 text-lg font-semibold text-center cursor-pointer">
-          📷 写真を撮る・選ぶ
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            onChange={onCapture}
-            className="hidden"
-          />
-        </label>
-        <div className="text-sm text-gray-600">
-          未読取 <b>{pendingN}</b> / 読取済 <b>{readN}</b> / 登録済{" "}
+        <div className="flex flex-col gap-2">
+          <label className="bg-blue-600 text-white rounded-lg py-5 text-xl font-bold text-center cursor-pointer active:bg-blue-700">
+            📷 ラベルを撮る
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              onChange={onCapture}
+              className="hidden"
+            />
+          </label>
+          <label className="bg-white border-2 border-blue-600 text-blue-700 rounded-lg py-4 text-lg font-semibold text-center cursor-pointer active:bg-blue-50">
+            🖼 写真から選ぶ
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={onCapture}
+              className="hidden"
+            />
+          </label>
+        </div>
+        <div className="text-base text-gray-700">
+          未読取 <b>{pendingN}</b> ／ 読取済 <b>{readN}</b> ／ 登録済{" "}
           <b>{regN}</b>
         </div>
         <button
           onClick={scanPending}
           disabled={!online || scanning || pendingN === 0}
-          className="bg-purple-600 text-white rounded-lg py-3 font-semibold disabled:bg-gray-300"
+          className="bg-purple-600 text-white rounded-lg py-3 text-lg font-bold disabled:bg-gray-300"
         >
           {scanning
             ? "Claude で読み取り中..."
@@ -282,6 +294,11 @@ export default function LabelsPage() {
               ? `Claude でまとめて読み取る（${pendingN}枚）`
               : "電波が戻ったら読み取れます"}
         </button>
+        {pendingN === 0 && (
+          <div className="text-sm text-gray-700 text-center">
+            先にラベルを撮ってください。
+          </div>
+        )}
         {msg && <div className="text-sm text-blue-700">{msg}</div>}
       </section>
 

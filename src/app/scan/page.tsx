@@ -65,9 +65,28 @@ export default function ScanPage() {
 
   function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const list = Array.from(e.target.files ?? []);
+    appendFiles(list);
+    e.target.value = "";
+  }
+
+  function appendFiles(list: File[]) {
+    if (list.length === 0) return;
+    const nextFiles = [...files, ...list];
+    const nextPreviews = [
+      ...previews,
+      ...list.map((f) => URL.createObjectURL(f)),
+    ];
+    setFiles(nextFiles);
+    setPreviews(nextPreviews);
+    setDrafts([]);
+    setError("");
+    setResult("");
+  }
+
+  function resetFiles() {
     previews.forEach((u) => URL.revokeObjectURL(u));
-    setFiles(list);
-    setPreviews(list.map((f) => URL.createObjectURL(f)));
+    setFiles([]);
+    setPreviews([]);
     setDrafts([]);
     setError("");
     setResult("");
@@ -266,39 +285,91 @@ export default function ScanPage() {
       </p>
 
       <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-3">
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          onChange={onFiles}
-          className="text-base"
-        />
-        {previews.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto">
-            {previews.map((p, i) => (
-              <img
-                key={i}
-                src={p}
-                alt=""
-                className="h-32 rounded border object-contain"
+        {files.length === 0 ? (
+          <div className="flex flex-col gap-2">
+            <label className="bg-blue-600 text-white rounded-lg py-5 text-xl font-bold text-center cursor-pointer active:bg-blue-700">
+              📷 用紙を撮る
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                onChange={onFiles}
+                className="hidden"
               />
-            ))}
+            </label>
+            <label className="bg-white border-2 border-blue-600 text-blue-700 rounded-lg py-4 text-lg font-semibold text-center cursor-pointer active:bg-blue-50">
+              🖼 写真から選ぶ
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={onFiles}
+                className="hidden"
+              />
+            </label>
           </div>
+        ) : (
+          <>
+            <div className="flex gap-2 overflow-x-auto">
+              {previews.map((p, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={p}
+                  alt=""
+                  className="h-28 rounded border object-cover"
+                />
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-base font-semibold">
+                {files.length} 枚選択済み
+              </div>
+              <div className="flex gap-2">
+                <label className="bg-white border-2 border-blue-600 text-blue-700 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer active:bg-blue-50">
+                  📷 もう 1 枚
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    multiple
+                    onChange={onFiles}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  onClick={resetFiles}
+                  className="bg-gray-100 border rounded-lg px-3 py-2 text-sm"
+                >
+                  撮り直す
+                </button>
+              </div>
+            </div>
+          </>
         )}
-        <div className="flex items-center gap-2">
+
+        <div className="flex flex-col gap-1">
           <button
             onClick={runScan}
             disabled={loading || files.length === 0 || !online}
-            className="bg-purple-600 text-white px-4 py-3 rounded-lg font-semibold disabled:bg-gray-300"
+            className="bg-purple-600 text-white px-4 py-4 rounded-lg text-lg font-bold disabled:bg-gray-300"
           >
             {loading ? "Claudeで読み取り中..." : "Claudeで読み取る"}
           </button>
-          {!online && (
-            <span className="text-sm text-gray-500">
-              電波がないので戻ってから読み取ります
-            </span>
+          {files.length === 0 && (
+            <div className="text-sm text-gray-700 text-center">
+              先に用紙を撮ってください。
+            </div>
           )}
-          {error && <span className="text-sm text-red-600">{error}</span>}
+          {!online && (
+            <div className="text-sm text-gray-500 text-center">
+              電波がないので戻ってから読み取ります
+            </div>
+          )}
+          {error && (
+            <div className="text-sm text-blue-700">{error}</div>
+          )}
         </div>
       </section>
 
@@ -331,98 +402,108 @@ export default function ScanPage() {
                   className="border rounded px-2 py-1 flex-1"
                 />
               </div>
-              <div className="overflow-x-auto">
-                <table className="text-sm w-full">
-                  <thead>
-                    <tr className="text-left border-b">
-                      <th className="py-1 pr-1">採用</th>
-                      <th className="py-1 pr-1">順</th>
-                      <th className="py-1 pr-1">品名</th>
-                      <th className="py-1 pr-1">読み</th>
-                      <th className="py-1 pr-1">単位</th>
-                      <th className="py-1 pr-1">先月</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {s.items.map((it) => (
-                      <tr key={it.key} className="border-b">
-                        <td className="py-1 pr-1">
-                          <input
-                            type="checkbox"
-                            checked={it.include}
-                            onChange={(e) =>
-                              updateItem(s.key, it.key, {
-                                include: e.target.checked,
-                              })
-                            }
-                            className="w-5 h-5"
-                          />
-                        </td>
-                        <td className="py-1 pr-1 w-14">
-                          <input
-                            type="number"
-                            value={it.sheet_order}
-                            onChange={(e) =>
-                              updateItem(s.key, it.key, {
-                                sheet_order: Number(e.target.value) || 0,
-                              })
-                            }
-                            className="border rounded px-1 py-0.5 w-14"
-                          />
-                        </td>
-                        <td className="py-1 pr-1">
-                          <input
-                            value={it.name}
-                            onChange={(e) =>
-                              updateItem(s.key, it.key, { name: e.target.value })
-                            }
-                            className="border rounded px-2 py-0.5 w-full"
-                          />
-                        </td>
-                        <td className="py-1 pr-1">
-                          <input
-                            value={it.reading}
-                            onChange={(e) =>
-                              updateItem(s.key, it.key, {
-                                reading: e.target.value,
-                              })
-                            }
-                            className="border rounded px-2 py-0.5 w-full"
-                          />
-                        </td>
-                        <td className="py-1 pr-1">
-                          <select
-                            value={it.unit}
-                            onChange={(e) =>
-                              updateItem(s.key, it.key, {
-                                unit: toUnit(e.target.value),
-                              })
-                            }
-                            className="border rounded px-1 py-0.5"
-                          >
-                            {UNITS.map((u) => (
-                              <option key={u} value={u}>
-                                {u}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="py-1 pr-1 w-20">
-                          <input
-                            value={it.last_month_qty}
-                            onChange={(e) =>
-                              updateItem(s.key, it.key, {
-                                last_month_qty: e.target.value,
-                              })
-                            }
-                            className="border rounded px-1 py-0.5 w-20"
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="flex flex-col gap-3">
+                {s.items.map((it) => (
+                  <li
+                    key={it.key}
+                    className={`rounded-lg border-2 p-3 flex flex-col gap-2 ${
+                      it.include
+                        ? "bg-white border-blue-200"
+                        : "bg-gray-50 border-gray-200 opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={it.include}
+                          onChange={(e) =>
+                            updateItem(s.key, it.key, {
+                              include: e.target.checked,
+                            })
+                          }
+                          className="w-6 h-6"
+                        />
+                        <span className="text-sm">登録する</span>
+                      </label>
+                      <div className="flex-1" />
+                      <label className="flex items-center gap-1 text-sm">
+                        順
+                        <input
+                          type="number"
+                          value={it.sheet_order}
+                          onChange={(e) =>
+                            updateItem(s.key, it.key, {
+                              sheet_order: Number(e.target.value) || 0,
+                            })
+                          }
+                          className="border rounded px-2 py-1 w-14 text-right"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-sm text-gray-700">品名</span>
+                      <input
+                        value={it.name}
+                        onChange={(e) =>
+                          updateItem(s.key, it.key, { name: e.target.value })
+                        }
+                        className="border rounded-lg px-3 py-2 text-lg w-full"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                      <span className="text-sm text-gray-700">
+                        読み（ひらがな）
+                      </span>
+                      <input
+                        value={it.reading}
+                        onChange={(e) =>
+                          updateItem(s.key, it.key, {
+                            reading: e.target.value,
+                          })
+                        }
+                        className="border rounded-lg px-3 py-2 text-base w-full"
+                      />
+                    </label>
+
+                    <div className="flex gap-2">
+                      <label className="flex flex-col gap-1 flex-1">
+                        <span className="text-sm text-gray-700">単位</span>
+                        <select
+                          value={it.unit}
+                          onChange={(e) =>
+                            updateItem(s.key, it.key, {
+                              unit: toUnit(e.target.value),
+                            })
+                          }
+                          className="border rounded-lg px-2 py-2 text-base w-full"
+                        >
+                          {UNITS.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 flex-1">
+                        <span className="text-sm text-gray-700">先月の数量</span>
+                        <input
+                          value={it.last_month_qty}
+                          onChange={(e) =>
+                            updateItem(s.key, it.key, {
+                              last_month_qty: e.target.value,
+                            })
+                          }
+                          className="border rounded-lg px-2 py-2 text-base w-full text-right"
+                          inputMode="decimal"
+                        />
+                      </label>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </section>
           ))}
         </>
