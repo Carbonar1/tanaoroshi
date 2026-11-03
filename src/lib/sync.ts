@@ -248,24 +248,50 @@ async function syncItems(
   return itemMap;
 }
 
-async function syncStocktake(localStock: Stocktake): Promise<number | null> {
+// 棚卸しは「月」で突き合わせ、全端末で同じサーバー行を共有する。
+// 1. 月で既存を検索
+// 2. 無ければ作成（他端末との競合で失敗したら、もう一度検索）
+async function syncStocktake(
+  localStock: Stocktake,
+  result?: SyncResult,
+): Promise<number | null> {
   const sb = supabase();
   if (!sb) return null;
-  const { data, error } = await sb
+
+  const { data: existing, error: fetchErr } = await sb
     .from("stocktakes")
-    .upsert(
-      {
-        month: localStock.month,
-        status: localStock.status,
-        tax_mode: localStock.tax_mode,
-        tax_rate: localStock.tax_rate,
-      },
-      { onConflict: "month" },
-    )
     .select("id")
-    .single();
-  if (error) return null;
-  return (data as RemoteStocktake).id;
+    .eq("month", localStock.month)
+    .maybeSingle();
+  if (fetchErr) {
+    result?.errors.push(`棚卸しの取得：${humanize(fetchErr.message)}`);
+    return null;
+  }
+  if (existing) return (existing as { id: number }).id;
+
+  const { data: inserted, error: insErr } = await sb
+    .from("stocktakes")
+    .insert({
+      month: localStock.month,
+      status: localStock.status,
+      tax_mode: localStock.tax_mode,
+      tax_rate: localStock.tax_rate,
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (insErr) {
+    // 他端末が先に作った可能性 → もう一度月で検索
+    const { data: again } = await sb
+      .from("stocktakes")
+      .select("id")
+      .eq("month", localStock.month)
+      .maybeSingle();
+    if (again) return (again as { id: number }).id;
+    result?.errors.push(`棚卸しの作成：${humanize(insErr.message)}`);
+    return null;
+  }
+  return inserted ? (inserted as { id: number }).id : null;
 }
 
 // 入力の記録：1 件ずつ upsert（client_uid で二重登録を防止）
@@ -524,7 +550,7 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     const supplierMap = await syncSuppliers(result);
     const itemMap = await syncItems(supplierMap, result);
     await syncMembers(result);
-    const serverStocktakeId = await syncStocktake(stocktake);
+    const serverStocktakeId = await syncStocktake(stocktake, result);
     if (serverStocktakeId != null) {
       await pushEntries(stocktake, serverStocktakeId, itemMap, result);
       await pullEntries(stocktake, serverStocktakeId, itemMap, result);

@@ -574,18 +574,24 @@ export default function SettingsPage() {
     const stId = stocktake.id!;
     const month = stocktake.month;
     dlg.confirm({
-      title: `${month} の入力記録を全部消しますか？`,
-      body: "品目・発注先は残ります。元に戻せません。",
+      title: `${month} の入力記録を、この端末だけ消しますか？`,
+      body:
+        "⚠ この端末に入っている入力記録だけ消します。\n" +
+        "他の端末や、サーバー（Supabase）側の全員分は消しません。\n" +
+        "次に「送る」を押すと、他の端末の記録が戻ってきます。\n" +
+        "品目・発注先・名前の一覧は残ります。",
       tone: "danger",
-      confirmLabel: "消す",
+      confirmLabel: "この端末だけ消す",
       cancelLabel: "やめる",
-      success: { title: "消しました" },
+      success: { title: "この端末の記録を消しました" },
       onConfirm: async (): Promise<string> => {
+        // 念のため、画面遷移中の自動同期と重ならないように少し待つ
+        await new Promise((r) => setTimeout(r, 50));
         const n = await db.count_entries
           .where("stocktake_id")
           .equals(stId)
           .delete();
-        return `${n} 件の入力を消しました。`;
+        return `${n} 件の入力を、この端末から消しました。`;
       },
     });
   }
