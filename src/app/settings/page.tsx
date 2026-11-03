@@ -745,7 +745,7 @@ export default function SettingsPage() {
               success: { title: "まとめました" },
               onConfirm: async (): Promise<string> => {
                 const r = await dedupeLocalDb();
-                return `発注先 ${r.mergedSuppliers} 件、品目 ${r.mergedItems} 件をまとめました。`;
+                return `棚卸し ${r.mergedStocktakes} 件、発注先 ${r.mergedSuppliers} 件、品目 ${r.mergedItems} 件をまとめました。`;
               },
             })
           }

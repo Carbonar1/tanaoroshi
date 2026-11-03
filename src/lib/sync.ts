@@ -471,10 +471,47 @@ async function syncMembers(result: SyncResult): Promise<void> {
 export async function dedupeLocalDb(): Promise<{
   mergedSuppliers: number;
   mergedItems: number;
+  mergedStocktakes: number;
 }> {
   let mergedSuppliers = 0;
   let mergedItems = 0;
+  let mergedStocktakes = 0;
 
+  await db.transaction(
+    "rw",
+    db.suppliers,
+    db.items,
+    db.stocktakes,
+    db.count_entries,
+    db.settings,
+    async () => {
+      // 棚卸し：同じ月は 1 つにまとめ、入力記録を残す側に付け替える。
+      const stocktakes = await db.stocktakes.toArray();
+      const { remap: stRemap } = pickKeeperMap(
+        stocktakes.map((s) => ({ id: s.id!, month: s.month })),
+        (r) => r.month,
+      );
+      if (stRemap.size > 0) {
+        for (const [removed, keeper] of stRemap) {
+          await db.count_entries
+            .where("stocktake_id")
+            .equals(removed)
+            .modify({ stocktake_id: keeper });
+        }
+        await db.stocktakes.bulkDelete([...stRemap.keys()]);
+        mergedStocktakes = stRemap.size;
+        // active_stocktake_id を残す側に付け替える
+        const row = await db.settings.get("active_stocktake_id");
+        const activeId = row ? Number(row.value) : 0;
+        if (stRemap.has(activeId)) {
+          await db.settings.put({
+            key: "active_stocktake_id",
+            value: String(stRemap.get(activeId)),
+          });
+        }
+      }
+    },
+  );
   await db.transaction(
     "rw",
     db.suppliers,
@@ -521,7 +558,7 @@ export async function dedupeLocalDb(): Promise<{
     },
   );
 
-  return { mergedSuppliers, mergedItems };
+  return { mergedSuppliers, mergedItems, mergedStocktakes };
 }
 
 let syncing = false;

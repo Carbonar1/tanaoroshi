@@ -157,6 +157,54 @@ class TanaoroshiDB extends Dexie {
       settings: "key",
       label_photos: "++id, stocktake_id, status, taken_at",
     });
+    this.version(7)
+      .stores({
+        suppliers: "++id, name, sort_order",
+        items:
+          "++id, name, reading, supplier_id, sheet_order, active, [supplier_id+name]",
+        stocktakes: "++id, month, status",
+        count_entries:
+          "++id, &client_uid, stocktake_id, item_id, counted_at, synced_at, [stocktake_id+item_id]",
+        settings: "key",
+        label_photos: "++id, stocktake_id, status, taken_at",
+        members: "++id, &name, active, updated_at",
+      })
+      .upgrade(async (tx) => {
+        // 同じ月の棚卸しが複数ある古いデータを 1 つに統合する。
+        // id が最も小さい行を残し、残りの count_entries を付け替えて削除する。
+        type StRow = { id: number; month: string };
+        const sts = (await tx.table("stocktakes").toArray()) as StRow[];
+        const byMonth = new Map<string, StRow[]>();
+        for (const s of sts) {
+          const list = byMonth.get(s.month) ?? [];
+          list.push(s);
+          byMonth.set(s.month, list);
+        }
+        for (const list of byMonth.values()) {
+          if (list.length <= 1) continue;
+          list.sort((a, b) => a.id - b.id);
+          const keeper = list[0];
+          for (const o of list.slice(1)) {
+            await tx
+              .table("count_entries")
+              .where("stocktake_id")
+              .equals(o.id)
+              .modify({ stocktake_id: keeper.id });
+            await tx.table("stocktakes").delete(o.id);
+          }
+          // 設定の active_stocktake_id も付け替える
+          const row = await tx.table("settings").get("active_stocktake_id");
+          const activeId =
+            row && typeof (row as { value?: string }).value === "string"
+              ? Number((row as { value: string }).value)
+              : 0;
+          if (list.slice(1).some((o) => o.id === activeId)) {
+            await tx
+              .table("settings")
+              .put({ key: "active_stocktake_id", value: String(keeper.id) });
+          }
+        }
+      });
     this.version(6)
       .stores({
         suppliers: "++id, name, sort_order",
@@ -208,40 +256,92 @@ export function currentMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+// 同時に呼ばれても 1 つしか作らないよう、Dexie のトランザクション内で
+// 検索 → 無ければ作成を 1 本にまとめる。
+// さらに、同じ月の重複行があればここで統合する（起動時の自動掃除）。
+let ensurePromise: Promise<Stocktake> | null = null;
 export async function ensureCurrentStocktake(): Promise<Stocktake> {
-  const activeId = await getSetting("active_stocktake_id", "");
-  if (activeId) {
-    const row = await db.stocktakes.get(Number(activeId));
-    if (row) return row;
+  if (ensurePromise) return ensurePromise;
+  ensurePromise = (async () => {
+    const result = await db.transaction(
+      "rw",
+      db.stocktakes,
+      db.count_entries,
+      db.settings,
+      async () => {
+        const month = currentMonth();
+        // この月の棚卸しを全部取る（重複があれば統合する）
+        const all = await db.stocktakes.where("month").equals(month).toArray();
+        if (all.length > 1) {
+          all.sort((a, b) => a.id! - b.id!);
+          const keeper = all[0];
+          for (const o of all.slice(1)) {
+            await db.count_entries
+              .where("stocktake_id")
+              .equals(o.id!)
+              .modify({ stocktake_id: keeper.id! });
+            await db.stocktakes.delete(o.id!);
+          }
+          await db.settings.put({
+            key: "active_stocktake_id",
+            value: String(keeper.id),
+          });
+          return keeper;
+        }
+
+        // active_stocktake_id を見る
+        const activeRow = await db.settings.get("active_stocktake_id");
+        const activeIdStr = activeRow?.value ?? "";
+        if (activeIdStr) {
+          const row = await db.stocktakes.get(Number(activeIdStr));
+          if (row) return row;
+        }
+
+        if (all.length === 1) {
+          await db.settings.put({
+            key: "active_stocktake_id",
+            value: String(all[0].id),
+          });
+          return all[0];
+        }
+
+        const id = await db.stocktakes.add({
+          month,
+          status: "open",
+          tax_mode: "excluded",
+          tax_rate: 8,
+          created_at: Date.now(),
+        });
+        await db.settings.put({
+          key: "active_stocktake_id",
+          value: String(id),
+        });
+        return (await db.stocktakes.get(id))!;
+      },
+    );
+    return result;
+  })();
+  try {
+    return await ensurePromise;
+  } finally {
+    ensurePromise = null;
   }
-  const month = currentMonth();
-  const existing = await db.stocktakes.where("month").equals(month).first();
-  if (existing) {
-    await setSetting("active_stocktake_id", String(existing.id));
-    return existing;
-  }
-  const id = await db.stocktakes.add({
-    month,
-    status: "open",
-    tax_mode: "excluded",
-    tax_rate: 8,
-    created_at: Date.now(),
-  });
-  await setSetting("active_stocktake_id", String(id));
-  return (await db.stocktakes.get(id))!;
 }
 
 export async function createStocktake(month: string): Promise<Stocktake> {
-  const existing = await db.stocktakes.where("month").equals(month).first();
-  if (existing) return existing;
-  const id = await db.stocktakes.add({
-    month,
-    status: "open",
-    tax_mode: "excluded",
-    tax_rate: 8,
-    created_at: Date.now(),
+  // トランザクションで検索→無ければ作成を 1 本にまとめる
+  return await db.transaction("rw", db.stocktakes, async () => {
+    const existing = await db.stocktakes.where("month").equals(month).first();
+    if (existing) return existing;
+    const id = await db.stocktakes.add({
+      month,
+      status: "open",
+      tax_mode: "excluded",
+      tax_rate: 8,
+      created_at: Date.now(),
+    });
+    return (await db.stocktakes.get(id))!;
   });
-  return (await db.stocktakes.get(id))!;
 }
 
 export async function setActiveStocktake(id: number): Promise<void> {
