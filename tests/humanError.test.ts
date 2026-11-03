@@ -48,4 +48,12 @@ describe("humanize", () => {
       /許可設定/,
     );
   });
+  it("413 PAYLOAD_TOO_LARGE を日本語に", () => {
+    expect(humanize(new Error("413: FUNCTION_PAYLOAD_TOO_LARGE"))).toMatch(
+      /写真が大きすぎました/,
+    );
+    expect(
+      humanize(new Error("Request Entity Too Large")),
+    ).toMatch(/写真が大きすぎました/);
+  });
 });

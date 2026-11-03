@@ -13,6 +13,7 @@ import {
 } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
 import { Dialog, useDialog } from "@/components/Dialog";
+import { resizeImageFile } from "@/lib/imageResize";
 
 type ScanResult = {
   id: number;
@@ -36,14 +37,6 @@ function LabelThumb({ blob }: { blob: Blob }) {
   if (!url) return <div className="w-28 h-28 bg-gray-100 rounded" />;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={url} alt="" className="w-28 h-28 object-cover rounded border" />;
-}
-
-async function blobToBase64(b: Blob): Promise<string> {
-  const buf = await b.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
 }
 
 function toUnit(u: string): Unit {
@@ -125,32 +118,52 @@ export default function LabelsPage() {
         supplier: supplierName.get(it.supplier_id) ?? "",
         unit: it.unit,
       }));
-      const images = await Promise.all(
-        pending.map(async (l) => ({
-          id: l.id!,
-          mimeType: l.mime,
-          dataBase64: await blobToBase64(l.blob),
-        })),
-      );
-      const res = await fetch("/api/labels/scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ images, knownItems }),
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`サーバー ${res.status}: ${t.slice(0, 200)}`);
-      }
-      const data = (await res.json()) as { results?: ScanResult[] };
-      const results = data.results ?? [];
-      for (const r of results) {
-        await db.label_photos.update(r.id, {
-          status: "read",
-          result_json: JSON.stringify(r),
-          item_id: r.match_item_id ?? undefined,
+      // 1 枚ずつ縮小→送信（4.5MB の上限を超えないように）
+      let done = 0;
+      for (const l of pending) {
+        setMsg(`写真 ${done + 1} / ${pending.length} を縮小中...`);
+        const resized = await resizeImageFile(l.blob);
+        setMsg(
+          `写真 ${done + 1} / ${pending.length} を送信中... （${Math.round(resized.byteLength / 1024)} KB）`,
+        );
+        const res = await fetch("/api/labels/scan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            images: [
+              {
+                id: l.id!,
+                mimeType: resized.mimeType,
+                dataBase64: resized.dataBase64,
+              },
+            ],
+            knownItems,
+          }),
         });
+        if (!res.ok) {
+          let detail = "";
+          try {
+            const j = (await res.json()) as {
+              error?: string;
+              details?: string;
+            };
+            detail = j.error ?? j.details ?? "";
+          } catch {
+            // ignore
+          }
+          throw new Error(detail || `${res.status}`);
+        }
+        const data = (await res.json()) as { results?: ScanResult[] };
+        for (const r of data.results ?? []) {
+          await db.label_photos.update(r.id, {
+            status: "read",
+            result_json: JSON.stringify(r),
+            item_id: r.match_item_id ?? undefined,
+          });
+        }
+        done += 1;
       }
-      setMsg(`${results.length} 枚を読み取りました。`);
+      setMsg(`${done} 枚を読み取りました。`);
     } catch (e) {
       setMsg(`エラー：${humanize(e)}`);
     } finally {

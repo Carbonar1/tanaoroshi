@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Unit, UNITS, db } from "@/lib/db";
 import { humanize } from "@/lib/humanError";
 import { Dialog, useDialog } from "@/components/Dialog";
+import { resizeImageFile } from "@/lib/imageResize";
 
 type ScannedItem = {
   name: string;
@@ -37,14 +38,6 @@ type DraftSupplier = {
 
 function toUnit(u: string): Unit {
   return (UNITS as string[]).includes(u) ? (u as Unit) : "箱";
-}
-
-async function fileToBase64(f: File): Promise<string> {
-  const buf = await f.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let bin = "";
-  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
 }
 
 export default function ScanPage() {
@@ -93,23 +86,41 @@ export default function ScanPage() {
     setError("");
     setDrafts([]);
     try {
-      const images = await Promise.all(
-        files.map(async (f) => ({
-          mimeType: f.type || "image/jpeg",
-          dataBase64: await fileToBase64(f),
-        })),
-      );
-      const res = await fetch("/api/items/scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ images }),
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`サーバー ${res.status}: ${t.slice(0, 200)}`);
+      // 1 枚ずつ縮小→送信（Vercel の 4.5MB を超えないよう 1 枚ずつ）
+      const allSuppliers: ScannedSupplier[] = [];
+      for (let i = 0; i < files.length; i++) {
+        setError(`写真 ${i + 1} / ${files.length} を縮小中...`);
+        const resized = await resizeImageFile(files[i]);
+        setError(
+          `写真 ${i + 1} / ${files.length} を送信中... （${Math.round(resized.byteLength / 1024)} KB）`,
+        );
+        const res = await fetch("/api/items/scan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            images: [
+              { mimeType: resized.mimeType, dataBase64: resized.dataBase64 },
+            ],
+          }),
+        });
+        if (!res.ok) {
+          let detail = "";
+          try {
+            const j = (await res.json()) as {
+              error?: string;
+              details?: string;
+            };
+            detail = j.error ?? j.details ?? "";
+          } catch {
+            // ignore
+          }
+          throw new Error(detail || `${res.status}`);
+        }
+        const data = (await res.json()) as { suppliers?: ScannedSupplier[] };
+        for (const s of data.suppliers ?? []) allSuppliers.push(s);
       }
-      const data = (await res.json()) as { suppliers?: ScannedSupplier[] };
-      const list = data.suppliers ?? [];
+      setError("");
+      const list = allSuppliers;
       const d: DraftSupplier[] = list.map((s, si) => ({
         key: `s-${si}`,
         supplier_name: s.supplier_name ?? "",

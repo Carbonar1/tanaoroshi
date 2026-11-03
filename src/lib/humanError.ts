@@ -35,6 +35,9 @@ export function humanize(e: unknown): string {
   if (/429/.test(msg)) {
     return "呼び出しが混み合っています。1 分ほど待ってから、もう一度試してください。";
   }
+  if (/413|PAYLOAD_TOO_LARGE|Request Entity Too Large/i.test(msg)) {
+    return "写真が大きすぎました。もう一度撮ってください（もう少し近づくか、別の角度で）。";
+  }
   if (!msg) return "うまくいきませんでした。もう一度試してください。";
   return msg;
 }
