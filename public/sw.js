@@ -2,7 +2,7 @@
 // インストール時に全画面の HTML と、HTML が参照する JS/CSS を一括で保存する。
 // 保管庫内（電波なし）でも、一度も開いていない画面を開けるようにする。
 
-const CACHE_VERSION = "tanaoroshi-v4";
+const CACHE_VERSION = "tanaoroshi-v5";
 
 const PRECACHE_ROUTES = [
   "/",

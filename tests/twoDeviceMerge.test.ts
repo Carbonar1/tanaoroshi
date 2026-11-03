@@ -316,6 +316,55 @@ describe("2 台が同じ月の棚卸しに別々に入力して送受信する",
     expect(a.persons(stA).size).toBe(3);
   });
 
+  it("相手の『決定』をまだ受け取っていない端末が『足す』：両方で 7kg", () => {
+    // ユーザー報告：
+    // SP が白味噌を「5 決定」→ 送る
+    // PC が白味噌を「2 足す」→ 送る（この時点で PC は SP の 5 を受け取っていない）
+    // 両方で送った後、両方の端末で 7kg が見えること
+    const sp = new Device("スマホ");
+    const pc = new Device("PC");
+    sp.seed();
+    pc.seed();
+    const stSp = sp.ensureStocktake(MONTH);
+    const stPc = pc.ensureStocktake(MONTH);
+
+    // 1. SP が『決定』で 5 を入れて送る
+    sp.add("田舎味噌", 5, "set", stSp, 100);
+    sync(sp, srv, MONTH);
+    // この時点で：SP 側＝set 5、サーバー＝set 5、PC 側＝まだ何もなし
+
+    // 2. PC が『足す』で 2 を入れる（PC はまだ SP の 5 を取り込んでいない）
+    pc.add("田舎味噌", 2, "add", stPc, 200);
+    // PC がもし「今の合計 0 ＋ 2 ＝ 2」として set 2 を保存していたら、ここでバグ
+    const pcLocalEntryMode = pc.entries[0].mode;
+    expect(pcLocalEntryMode).toBe("add");
+    const pcLocalEntryQty = pc.entries[0].qty;
+    expect(pcLocalEntryQty).toBe(2);
+
+    // 3. PC が送る → ここで PC がサーバーから SP の set 5 を受け取る
+    sync(pc, srv, MONTH);
+    // 送受信で mode が変わっていないこと（add が set になっていない）
+    const serverEntries = srv.entries.rows as unknown as Array<{
+      mode: string;
+      qty: number;
+      counted_by: string;
+    }>;
+    const spEntry = serverEntries.find((e) => e.counted_by === "スマホ");
+    const pcEntry = serverEntries.find((e) => e.counted_by === "PC");
+    expect(spEntry?.mode).toBe("set");
+    expect(spEntry?.qty).toBe(5);
+    expect(pcEntry?.mode).toBe("add");
+    expect(pcEntry?.qty).toBe(2);
+
+    // 4. SP も改めて送る → PC の『足す』を取り込む
+    sync(sp, srv, MONTH);
+
+    expect(sp.totalFor("田舎味噌", stSp)).toBe(7);
+    expect(pc.totalFor("田舎味噌", stPc)).toBe(7);
+    expect(sp.persons(stSp)).toEqual(new Set(["スマホ", "PC"]));
+    expect(pc.persons(stPc)).toEqual(new Set(["スマホ", "PC"]));
+  });
+
   it("再送信しても二重に取り込まない", () => {
     const a = new Device("松尾");
     const b = new Device("田中");
