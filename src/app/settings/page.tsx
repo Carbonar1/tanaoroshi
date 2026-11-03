@@ -8,8 +8,8 @@ import {
   ensureCurrentStocktake,
   createStocktake,
   setActiveStocktake,
-  getMembers,
-  setMembers,
+  addMember as addMemberDb,
+  removeMember as removeMemberDb,
   deviceId,
   newClientUid,
   userName,
@@ -28,8 +28,17 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
 
   const [newMonth, setNewMonth] = useState("");
-  const [members, setMembersState] = useState<string[]>([]);
   const [newMember, setNewMember] = useState("");
+  const members = useLiveQuery(
+    async () => {
+      const rows = await db.members
+        .filter((m) => m.active === 1)
+        .toArray();
+      return rows.map((m) => m.name);
+    },
+    [],
+    [] as string[],
+  );
   const dlg = useDialog();
 
   const allStocktakes = useLiveQuery(() =>
@@ -45,7 +54,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     reload();
-    getMembers().then(setMembersState);
   }, []);
 
   async function saveTax() {
@@ -86,11 +94,13 @@ export default function SettingsPage() {
     const n = newMember.trim();
     if (!n) return;
     try {
-      const next = Array.from(new Set([...members, n]));
-      await setMembers(next);
-      setMembersState(next);
+      await addMemberDb(n);
       setNewMember("");
-      dlg.info(`「${n}」を一覧に追加しました`, "", "success");
+      dlg.info(
+        `「${n}」を一覧に追加しました`,
+        "次に『送る』を押すと、他の端末にも反映されます。",
+        "success",
+      );
     } catch (e) {
       dlg.info("追加できませんでした", humanize(e), "error");
     }
@@ -99,15 +109,13 @@ export default function SettingsPage() {
   async function removeMember(name: string) {
     dlg.confirm({
       title: `${name} を外しますか？`,
-      body: "名前の一覧から外します。入力した記録は残ります。",
+      body: "一覧から外します。『送る』を押すと、他の端末からも外れます。入力した記録は残ります。",
       tone: "warn",
       confirmLabel: "外す",
       cancelLabel: "やめる",
       success: { title: "外しました" },
       onConfirm: async () => {
-        const next = members.filter((x) => x !== name);
-        await setMembers(next);
-        setMembersState(next);
+        await removeMemberDb(name);
       },
     });
   }
@@ -368,6 +376,7 @@ export default function SettingsPage() {
       stocktakes: await db.stocktakes.toArray(),
       count_entries: await db.count_entries.toArray(),
       settings: await db.settings.toArray(),
+      members: await db.members.toArray(),
     };
     const blob = new Blob([JSON.stringify(dump, null, 2)], {
       type: "application/json",

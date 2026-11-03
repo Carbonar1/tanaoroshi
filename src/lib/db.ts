@@ -89,6 +89,13 @@ export interface LabelPhoto {
   note?: string;
 }
 
+export interface Member {
+  id?: number;
+  name: string;
+  active: 0 | 1; // 0 ＝ 一覧から外した（Supabase と同期して他端末にも反映）
+  updated_at: number;
+}
+
 class TanaoroshiDB extends Dexie {
   suppliers!: Table<Supplier, number>;
   items!: Table<Item, number>;
@@ -96,6 +103,7 @@ class TanaoroshiDB extends Dexie {
   count_entries!: Table<CountEntry, number>;
   settings!: Table<Setting, string>;
   label_photos!: Table<LabelPhoto, number>;
+  members!: Table<Member, number>;
 
   constructor() {
     super("tanaoroshi");
@@ -149,6 +157,43 @@ class TanaoroshiDB extends Dexie {
       settings: "key",
       label_photos: "++id, stocktake_id, status, taken_at",
     });
+    this.version(6)
+      .stores({
+        suppliers: "++id, name, sort_order",
+        items:
+          "++id, name, reading, supplier_id, sheet_order, active, [supplier_id+name]",
+        stocktakes: "++id, month, status",
+        count_entries:
+          "++id, &client_uid, stocktake_id, item_id, counted_at, synced_at, [stocktake_id+item_id]",
+        settings: "key",
+        label_photos: "++id, stocktake_id, status, taken_at",
+        members: "++id, &name, active, updated_at",
+      })
+      .upgrade(async (tx) => {
+        const settingsTable = tx.table("settings");
+        const row = await settingsTable.get("members");
+        const rawValue =
+          row && typeof (row as { value?: unknown }).value === "string"
+            ? ((row as { value: string }).value as string)
+            : "";
+        if (!rawValue) return;
+        try {
+          const arr = JSON.parse(rawValue);
+          if (!Array.isArray(arr)) return;
+          const now = Date.now();
+          for (const name of arr) {
+            if (typeof name === "string" && name.trim()) {
+              await tx.table("members").add({
+                name: name.trim(),
+                active: 1,
+                updated_at: now,
+              });
+            }
+          }
+        } catch {
+          // 旧設定が壊れていたら無視
+        }
+      });
   }
 }
 
@@ -204,18 +249,33 @@ export async function setActiveStocktake(id: number): Promise<void> {
 }
 
 export async function getMembers(): Promise<string[]> {
-  const raw = await getSetting("members", "[]");
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
+  const rows = await db.members
+    .filter((m) => m.active === 1)
+    .toArray();
+  return rows.map((m) => m.name);
+}
+
+export async function addMember(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const existing = await db.members.where("name").equals(trimmed).first();
+  const now = Date.now();
+  if (existing) {
+    await db.members.update(existing.id!, { active: 1, updated_at: now });
+  } else {
+    await db.members.add({ name: trimmed, active: 1, updated_at: now });
   }
 }
 
-export async function setMembers(list: string[]): Promise<void> {
-  const unique = Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
-  await setSetting("members", JSON.stringify(unique));
+export async function removeMember(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const existing = await db.members.where("name").equals(trimmed).first();
+  if (!existing) return;
+  await db.members.update(existing.id!, {
+    active: 0,
+    updated_at: Date.now(),
+  });
 }
 
 export async function getSetting(

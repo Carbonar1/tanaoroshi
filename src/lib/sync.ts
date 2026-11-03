@@ -3,6 +3,7 @@
 import {
   CountEntry,
   Item,
+  Member,
   Stocktake,
   Supplier,
   Unit,
@@ -28,6 +29,8 @@ export type SyncResult = {
   pushedItems: number;
   pushedEntries: number;
   pulledEntries: number;
+  pulledMembers: number;
+  pushedMembers: number;
   errors: string[];
 };
 
@@ -38,6 +41,8 @@ const EMPTY_RESULT = (): SyncResult => ({
   pushedItems: 0,
   pushedEntries: 0,
   pulledEntries: 0,
+  pulledMembers: 0,
+  pushedMembers: 0,
   errors: [],
 });
 
@@ -369,6 +374,71 @@ async function pullEntries(
   }
 }
 
+// 名前の一覧：名前で突き合わせ、updated_at が新しい方を正にする
+async function syncMembers(result: SyncResult): Promise<void> {
+  const sb = supabase();
+  if (!sb) return;
+
+  const locals = await db.members.toArray();
+
+  // 1. ローカルの名前をまとめて upsert（名前で突き合わせ）
+  if (locals.length > 0) {
+    const payload = dedupePayload(
+      locals.map((l) => ({
+        name: l.name,
+        active: l.active === 1,
+      })),
+      ["name"],
+    );
+    const { data, error } = await sb
+      .from("members")
+      .upsert(payload, { onConflict: "name" })
+      .select("id, name, active, updated_at");
+    if (error) {
+      result.errors.push(`名前の送信：${humanize(error.message)}`);
+    } else {
+      result.pushedMembers += data?.length ?? 0;
+    }
+  }
+
+  // 2. サーバーの一覧を取得して、ローカルに適用
+  const { data: remote, error } = await sb
+    .from("members")
+    .select("id, name, active, updated_at");
+  if (error) {
+    result.errors.push(`名前の取得：${humanize(error.message)}`);
+    return;
+  }
+  const localByName = new Map<string, Member>();
+  locals.forEach((l) => localByName.set(l.name, l));
+  for (const r of (remote ?? []) as Array<{
+    name: string;
+    active: boolean;
+    updated_at: string;
+  }>) {
+    const serverTime = new Date(r.updated_at).getTime();
+    const activeNum: 0 | 1 = r.active ? 1 : 0;
+    const existing = localByName.get(r.name);
+    if (!existing) {
+      await db.members.add({
+        name: r.name,
+        active: activeNum,
+        updated_at: serverTime,
+      });
+      result.pulledMembers += 1;
+    } else if (
+      existing.updated_at < serverTime ||
+      existing.active !== activeNum
+    ) {
+      await db.members.update(existing.id!, {
+        active: activeNum,
+        updated_at: serverTime,
+      });
+      result.pulledMembers += 1;
+    }
+  }
+}
+
 // ローカル DB の重複行をまとめる。
 // - 発注先：同名が複数 → id の小さい方を残し、品目の supplier_id をそちらへ付け替え、重複行を削除
 // - 品目：同じ (supplier_id, name) が複数 → id の小さい方を残し、入力記録の item_id を付け替え、重複行を削除
@@ -453,6 +523,7 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     }
     const supplierMap = await syncSuppliers(result);
     const itemMap = await syncItems(supplierMap, result);
+    await syncMembers(result);
     const serverStocktakeId = await syncStocktake(stocktake);
     if (serverStocktakeId != null) {
       await pushEntries(stocktake, serverStocktakeId, itemMap, result);

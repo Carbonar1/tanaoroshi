@@ -5,7 +5,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import {
   db,
   ensureCurrentStocktake,
-  getMembers,
   setUserName,
   userName,
 } from "@/lib/db";
@@ -17,7 +16,16 @@ import { retryDelay } from "@/lib/retry";
 export default function StatusBar() {
   const [online, setOnline] = useState(true);
   const [name, setName] = useState("");
-  const [members, setMembers] = useState<string[]>([]);
+  const members = useLiveQuery(
+    async () => {
+      const rows = await db.members
+        .filter((m) => m.active === 1)
+        .toArray();
+      return rows.map((m) => m.name);
+    },
+    [],
+    [] as string[],
+  );
   const [editing, setEditing] = useState(false);
   const [freeInput, setFreeInput] = useState(false);
   const [draft, setDraft] = useState("");
@@ -101,17 +109,11 @@ export default function StatusBar() {
     }
   }
 
-  async function reloadMembers() {
-    const m = await getMembers();
-    setMembers(m);
-  }
-
   useEffect(() => {
     let mounted = true;
     setOnline(navigator.onLine);
     const current = userName();
     setName(current);
-    reloadMembers();
     if (!current) setEditing(true);
     // 自動送信は、ナビゲーションの衝突を避けるために 1 秒遅らせる
     if (navigator.onLine && hasSupabase() && !autoFiredRef.current) {
@@ -172,7 +174,6 @@ export default function StatusBar() {
   }
 
   function open() {
-    reloadMembers();
     setEditing(true);
   }
 
