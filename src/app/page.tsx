@@ -1,5 +1,6 @@
 import Link from "next/link";
 import FlowGuide from "@/components/FlowGuide";
+import SafeBoundary from "@/components/SafeBoundary";
 
 export default function Home() {
   return (
@@ -9,7 +10,9 @@ export default function Home() {
         月末の棚卸しを、電波のない保管庫でも入力できるアプリ。
       </p>
 
-      <FlowGuide />
+      <SafeBoundary>
+        <FlowGuide />
+      </SafeBoundary>
 
       <nav className="grid grid-cols-1 gap-3 mt-2">
         <Link

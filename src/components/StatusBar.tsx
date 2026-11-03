@@ -38,6 +38,19 @@ export default function StatusBar() {
   const retryAttemptRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unsyncedRef = useRef(0);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const safeSyncMsg = (v: string) => {
+    if (mountedRef.current) setSyncMsg(v);
+  };
+  const safeSyncing = (v: boolean) => {
+    if (mountedRef.current) setSyncing(v);
+  };
   useEffect(() => {
     unsyncedRef.current = unsynced ?? 0;
   }, [unsynced]);
@@ -49,63 +62,102 @@ export default function StatusBar() {
     }
   }
 
-  function scheduleRetry() {
+  function scheduleRetry(baseMsg: string) {
     clearRetry();
     const delay = retryDelay(retryAttemptRef.current);
     retryAttemptRef.current += 1;
     retryTimerRef.current = setTimeout(() => {
       retryTimerRef.current = null;
-      if (
-        typeof navigator !== "undefined" &&
-        navigator.onLine &&
-        unsyncedRef.current > 0
-      ) {
-        runSync(false);
+      try {
+        if (
+          mountedRef.current &&
+          typeof navigator !== "undefined" &&
+          navigator.onLine &&
+          unsyncedRef.current > 0
+        ) {
+          runSync(false);
+        }
+      } catch (e) {
+        console.error("[retry]", e);
       }
     }, delay);
-    setSyncMsg(
-      (prev) =>
-        `${prev || "送信できませんでした"}（${Math.round(delay / 1000)}秒後にもう一度試します）`,
+    safeSyncMsg(
+      `${baseMsg || "送れませんでした"}（${Math.round(delay / 1000)}秒後にもう一度試します）`,
     );
   }
 
+  // 送受信の中で起きたエラーは、必ずここで受け止めて、画面を落とさない。
   async function runSync(manual: boolean) {
-    if (!hasSupabase()) {
-      if (manual) setSyncMsg("Supabase 未設定");
-      return;
-    }
-    if (!navigator.onLine) {
-      if (manual) setSyncMsg("電波なし");
-      return;
-    }
-    if (syncing) return;
-    clearRetry();
-    setSyncing(true);
-    setSyncMsg("送信中...");
     try {
-      const st = await ensureCurrentStocktake();
-      const r = await syncNow(st);
-      if (r.errors.length > 0) {
-        setSyncMsg(humanize(r.errors[0]));
-        if (unsyncedRef.current > 0 && navigator.onLine) scheduleRetry();
-      } else {
-        retryAttemptRef.current = 0;
-        setSyncMsg(
-          `送信${r.pushedEntries}・受信${r.pulledEntries}・品目${r.pulledItems + r.pushedItems}`,
-        );
+      if (!hasSupabase()) {
+        if (manual) safeSyncMsg("Supabase が設定されていません");
+        return;
       }
-    } catch (e) {
-      setSyncMsg(humanize(e));
-      if (unsyncedRef.current > 0 && navigator.onLine) scheduleRetry();
-    } finally {
-      setSyncing(false);
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        if (manual) safeSyncMsg("電波がありません");
+        return;
+      }
+      if (syncing) return;
+      clearRetry();
+      safeSyncing(true);
+      safeSyncMsg("送信中...");
+      let msg = "送れませんでした";
+      let shouldRetry = false;
+      try {
+        const st = await ensureCurrentStocktake();
+        const r = await syncNow(st);
+        if (r && r.errors && r.errors.length > 0) {
+          msg = `送れませんでした：${humanize(r.errors[0])}`;
+          shouldRetry = true;
+          safeSyncMsg(msg);
+        } else {
+          retryAttemptRef.current = 0;
+          const pushedE = r?.pushedEntries ?? 0;
+          const pulledE = r?.pulledEntries ?? 0;
+          const items =
+            (r?.pulledItems ?? 0) + (r?.pushedItems ?? 0);
+          safeSyncMsg(`送信${pushedE}・受信${pulledE}・品目${items}`);
+        }
+      } catch (e) {
+        msg = `送れませんでした：${humanize(e)}`;
+        shouldRetry = true;
+        safeSyncMsg(msg);
+      } finally {
+        safeSyncing(false);
+      }
+      if (
+        shouldRetry &&
+        unsyncedRef.current > 0 &&
+        typeof navigator !== "undefined" &&
+        navigator.onLine
+      ) {
+        try {
+          scheduleRetry(msg);
+        } catch (e) {
+          console.error("[scheduleRetry]", e);
+        }
+      }
       setTimeout(() => {
+        if (!mountedRef.current) return;
         setSyncMsg((cur) =>
           cur.startsWith("送信中") || cur.startsWith("送信：")
             ? ""
             : cur,
         );
       }, 4000);
+    } catch (e) {
+      // どんなことがあっても画面を落とさない
+      console.error("[runSync fatal]", e);
+      try {
+        safeSyncMsg(`送れませんでした：${humanize(e)}`);
+      } catch {
+        // 無視
+      }
+      try {
+        safeSyncing(false);
+      } catch {
+        // 無視
+      }
     }
   }
 
