@@ -65,6 +65,8 @@ export default function GlobalError({
           >
             もう一度試す
           </button>
+          {/* global-error は html から描き直すので next/link は使えない。警告は抑止 */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/"
             style={{

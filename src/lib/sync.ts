@@ -13,7 +13,6 @@ import {
 import {
   RemoteEntry,
   RemoteItem,
-  RemoteStocktake,
   RemoteSupplier,
   hasSupabase,
   supabase,

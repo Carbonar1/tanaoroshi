@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 
 export default function ErrorPage({
   error,
@@ -35,12 +36,12 @@ export default function ErrorPage({
         >
           もう一度試す
         </button>
-        <a
+        <Link
           href="/"
           className="bg-gray-100 border rounded-lg py-4 text-xl font-semibold text-center"
         >
           ホームに戻る
-        </a>
+        </Link>
       </div>
 
       <details className="text-sm text-gray-700 mt-2 bg-gray-50 rounded-lg p-3 border">
