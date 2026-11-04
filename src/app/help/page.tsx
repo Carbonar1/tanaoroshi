@@ -16,6 +16,20 @@ export default function HelpPage() {
         毎月の棚卸しを、電波のない保管庫でもスマホで入力できます。順番は 3 つだけです。
       </p>
 
+      <div
+        className="bg-red-50 border-2 border-red-500 rounded-xl p-4 flex gap-3 print:hidden"
+      >
+        <div className="text-3xl">⚠</div>
+        <div className="flex flex-col gap-1">
+          <div className="text-lg font-bold text-red-700">
+            電波のないところでは、必ずホーム画面のアイコンから開いてください
+          </div>
+          <div className="text-sm text-red-900">
+            Safari のタブから開くと、電波なしではページが出ません。「ホーム画面に追加」したアイコンから開けば、電波なしでも開けます。
+          </div>
+        </div>
+      </div>
+
       <section className="bg-white rounded-xl shadow p-5 flex flex-col gap-3 border-l-8 border-blue-500">
         <div className="flex items-center gap-3">
           <span className="text-5xl font-bold text-blue-600">①</span>
