@@ -54,12 +54,15 @@ export default function CountPage() {
   const recent = useLiveQuery(
     async () => {
       if (!stocktake) return [];
+      // 「最近入れた品目」は、この端末の自分（userName）が入れたものだけに絞る
+      const me = userName();
       const list = await db.count_entries
         .where("stocktake_id")
         .equals(stocktake.id!)
         .reverse()
         .sortBy("counted_at");
-      return list.slice(0, 5);
+      const mine = me ? list.filter((e) => e.counted_by === me) : list;
+      return mine.slice(0, 5);
     },
     [stocktake?.id],
   );
