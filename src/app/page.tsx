@@ -54,6 +54,13 @@ export default function Home() {
         📖 このアプリの使い方（はじめての方へ）
       </Link>
 
+      <Link
+        href="/settings#demo"
+        className="block rounded-lg bg-amber-100 text-amber-900 text-center py-3 text-base font-semibold border-2 border-amber-400"
+      >
+        🧪 試す（デモデータを入れる）
+      </Link>
+
       <h2 className="text-sm font-semibold mt-4 text-gray-700">管理</h2>
       <nav className="grid grid-cols-2 gap-3">
         <Link

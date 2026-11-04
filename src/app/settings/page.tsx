@@ -777,7 +777,7 @@ export default function SettingsPage() {
         </label>
       </section>
 
-      <section className="bg-white rounded-lg shadow p-4 flex flex-col gap-2">
+      <section id="demo" className="bg-white rounded-lg shadow p-4 flex flex-col gap-2 scroll-mt-20">
         <h2 className="text-lg font-semibold">デモ用（本番とは別）</h2>
         <div className="text-sm text-gray-600">
           架空の業者と品目で、わざと間違いを含んだ入力を一括で作ります。デモ月（DEMO）に入るので、本番の月とは混ざりません。
