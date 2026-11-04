@@ -17,7 +17,7 @@ export default function HelpPage() {
       </p>
 
       <div
-        className="bg-red-50 border-2 border-red-500 rounded-xl p-4 flex gap-3 print:hidden"
+        className="bg-red-50 border-2 border-red-500 rounded-xl p-4 flex gap-3"
       >
         <div className="text-3xl">⚠</div>
         <div className="flex flex-col gap-1">
