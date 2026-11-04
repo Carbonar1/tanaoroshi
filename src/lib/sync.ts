@@ -603,7 +603,7 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     return result;
   }
   if (syncing) {
-    result.errors.push("送信中です。");
+    // すでに他の呼び出しが送信中。エラーとして返さず、空の結果で静かに終わる
     return result;
   }
   syncing = true;

@@ -228,34 +228,34 @@ export default function ExportPage() {
 
   return (
     <main className="p-4 max-w-4xl mx-auto w-full flex flex-col gap-4">
-      <div className="flex items-center justify-between no-print">
+      <div className="flex flex-col gap-2 no-print">
         <Link href="/" className="text-blue-600 underline text-sm">
           ← ホーム
         </Link>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => window.print()}
-            className="bg-blue-600 text-white px-4 py-2 rounded"
+            className="bg-blue-600 text-white px-3 py-2 rounded text-sm"
           >
             印刷
           </button>
           <button
             onClick={exportAllCsv}
-            className="bg-emerald-600 text-white px-4 py-2 rounded"
+            className="bg-emerald-600 text-white px-3 py-2 rounded text-sm"
           >
             CSVを出す
           </button>
           {isClosed ? (
             <button
               onClick={reopenStocktake}
-              className="bg-amber-500 text-white px-4 py-2 rounded"
+              className="bg-amber-500 text-white px-3 py-2 rounded text-sm"
             >
               確定を外す
             </button>
           ) : (
             <button
               onClick={closeStocktake}
-              className="bg-rose-600 text-white px-4 py-2 rounded"
+              className="bg-rose-600 text-white px-3 py-2 rounded text-sm"
             >
               この月を確定する
             </button>
@@ -284,14 +284,15 @@ export default function ExportPage() {
               日付：{stocktake.month.replace("-", "/")}/__
             </div>
           </div>
-          <table className="w-full text-sm border-collapse">
+          <div className="overflow-x-auto -mx-3 px-3 print:overflow-visible print:mx-0 print:px-0">
+          <table className="w-full text-sm border-collapse" style={{ minWidth: 520 }}>
             <thead>
               <tr className="border-b bg-gray-50">
-                <th className="text-left py-1 px-2 w-10">順</th>
-                <th className="text-left py-1 px-2">品名</th>
-                <th className="text-right py-1 px-2 w-28">数量</th>
-                <th className="text-right py-1 px-2 w-24">単価</th>
-                <th className="text-right py-1 px-2 w-28">金額</th>
+                <th className="text-left py-1 px-2 w-10 whitespace-nowrap">順</th>
+                <th className="text-left py-1 px-2 whitespace-nowrap" style={{ minWidth: 140 }}>品名</th>
+                <th className="text-right py-1 px-2 w-24 whitespace-nowrap">数量</th>
+                <th className="text-right py-1 px-2 w-20 whitespace-nowrap">単価</th>
+                <th className="text-right py-1 px-2 w-24 whitespace-nowrap">金額</th>
               </tr>
             </thead>
             <tbody>
@@ -300,8 +301,8 @@ export default function ExportPage() {
                   <td className="py-1 px-2 text-gray-500">
                     {r.item.sheet_order}
                   </td>
-                  <td className="py-1 px-2">{r.item.name}</td>
-                  <td className="py-1 px-2 text-right">
+                  <td className="py-1 px-2 whitespace-nowrap">{r.item.name}</td>
+                  <td className="py-1 px-2 text-right whitespace-nowrap">
                     {r.qty == null ? (
                       <span className="text-red-600">未入力</span>
                     ) : (
@@ -313,12 +314,12 @@ export default function ExportPage() {
                       </>
                     )}
                   </td>
-                  <td className="py-1 px-2 text-right">
+                  <td className="py-1 px-2 text-right whitespace-nowrap">
                     {r.item.unit_price != null
                       ? fmtMoney(r.item.unit_price)
                       : ""}
                   </td>
-                  <td className="py-1 px-2 text-right">
+                  <td className="py-1 px-2 text-right whitespace-nowrap">
                     {r.qty == null ? "" : fmtMoney(r.amount)}
                   </td>
                 </tr>
@@ -333,6 +334,7 @@ export default function ExportPage() {
               </tr>
             </tbody>
           </table>
+          </div>
         </section>
       ))}
 
