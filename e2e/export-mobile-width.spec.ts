@@ -28,10 +28,10 @@ test.describe("/export のスマホ幅レイアウト", () => {
     await fresh(page);
     await page.goto("/settings");
     await page.waitForLoadState("networkidle").catch(() => {});
-    await page
-      .getByRole("button", { name: /デモ用の今月入力を作る/ })
-      .click();
-    await page.getByRole("button", { name: "作る", exact: true }).click();
+    const seedBtn = page.getByRole("button", { name: /デモ用の今月入力を作る/ });
+    await seedBtn.scrollIntoViewIfNeeded();
+    await seedBtn.click();
+    await page.getByRole("dialog").getByRole("button", { name: "作る", exact: true }).click();
     await page.getByText("デモ入力を作りました").waitFor({ timeout: 15_000 });
     await page.getByRole("dialog").getByRole("button", { name: "閉じる" }).click();
 
@@ -55,10 +55,10 @@ test.describe("/export のスマホ幅レイアウト", () => {
     await fresh(page);
     await page.goto("/settings");
     await page.waitForLoadState("networkidle").catch(() => {});
-    await page
-      .getByRole("button", { name: /デモ用の今月入力を作る/ })
-      .click();
-    await page.getByRole("button", { name: "作る", exact: true }).click();
+    const seedBtn = page.getByRole("button", { name: /デモ用の今月入力を作る/ });
+    await seedBtn.scrollIntoViewIfNeeded();
+    await seedBtn.click();
+    await page.getByRole("dialog").getByRole("button", { name: "作る", exact: true }).click();
     await page.getByText("デモ入力を作りました").waitFor({ timeout: 15_000 });
     await page.getByRole("dialog").getByRole("button", { name: "閉じる" }).click();
 
