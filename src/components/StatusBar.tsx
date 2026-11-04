@@ -184,6 +184,10 @@ export default function StatusBar() {
       if (!mounted) return;
       setOnline(false);
       clearRetry();
+      // 電波が無くなったら「送信中…」のメッセージは残さない
+      setSyncMsg((cur) =>
+        cur.startsWith("送信中") || cur.startsWith("送信：") ? "" : cur,
+      );
     };
     const onVisible = () => {
       if (
