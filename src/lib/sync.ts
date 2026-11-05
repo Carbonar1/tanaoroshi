@@ -606,6 +606,9 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     // すでに他の呼び出しが送信中。エラーとして返さず、空の結果で静かに終わる
     return result;
   }
+  // DEMO 月は、棚卸しと入力の記録はサーバーに送らない（複数の審査員がデモを押しても混ざらない）
+  // ただし 品目・発注先・名前 は共有のまま同期する
+  const isDemo = stocktake.month === "DEMO";
   syncing = true;
   try {
     try {
@@ -616,6 +619,10 @@ export async function syncNow(stocktake: Stocktake): Promise<SyncResult> {
     const supplierMap = await syncSuppliers(result);
     const itemMap = await syncItems(supplierMap, result);
     await syncMembers(result);
+    if (isDemo) {
+      // DEMO 月の stocktake・count_entries は端末の中だけ
+      return result;
+    }
     const serverStocktakeId = await syncStocktake(stocktake, result);
     if (serverStocktakeId != null) {
       await pushEntries(stocktake, serverStocktakeId, itemMap, result);
