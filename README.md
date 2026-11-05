@@ -68,7 +68,7 @@ API キーは**サーバー側（Next.js API ルート）だけ**で使い、画
 - IndexedDB は Dexie 4（スキーマ v7）
 - Supabase（Postgres）、ログインなしの運用（匿名 RLS）
 - Claude API はサーバー側から `fetch` で直接呼ぶ。`maxDuration = 60`
-- テスト：Vitest **133 件**（純粋ロジック）＋ Playwright **45 件**（E2E chromium を主軸に、webkit の 2 端末同期系は skip して正直に書く。全画面エラーなし確認・2 端末合流・画像縮小・バックアップ再現・オフライン→送信・IME 変換中 Enter など）
+- テスト：Vitest **139 件**（純粋ロジック）＋ Playwright **47 件**（chromium + webkit の両方で走る合計。chromium 38＋webkit 9。webkit の 2 端末同期系は timing 不安定で `test.skip` 30 件、`offline-clears-sync-msg` 1 件も manual check で skip。全画面エラーなし確認・2 端末合流・画像縮小・バックアップ再現・オフライン→送信・IME 変換中 Enter など）
 
 ## 画面
 

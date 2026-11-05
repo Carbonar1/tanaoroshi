@@ -44,7 +44,7 @@ test.describe("スマホのバックアップで再現する不具合", () => {
 
     await page.goto("/");
     await page.evaluate(() => {
-      localStorage.setItem("tanaoroshi.user_name", "松尾龍太");
+      localStorage.setItem("tanaoroshi.user_name", "松尾");
     });
     // Dexie が DB を開いてテーブルを作るのを待つ
     await page.waitForLoadState("networkidle").catch(() => {});
