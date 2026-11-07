@@ -8,6 +8,10 @@ Built with Claude: Japan 2026（Anthropic 公式ハッカソン）応募作品�
 
 公開版：https://tanaoroshi-theta.vercel.app
 
+デモ動画（3 分）：https://youtu.be/IP13Vb3zOu4
+
+[![デモ動画](https://img.youtube.com/vi/IP13Vb3zOu4/maxresdefault.jpg)](https://youtu.be/IP13Vb3zOu4)
+
 ## 試し方（3 行）
 
 1. 公開版を開く → 右上の **『名前を入れる』** を押し、名前を 1 つ選ぶ（デモ用の 松尾／田中／佐藤 で OK）
