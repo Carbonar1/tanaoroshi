@@ -14,6 +14,14 @@ Built with Claude: Japan 2026（Anthropic 公式ハッカソン）応募作品�
 2. 下の **『設定』** → **『デモ用の今月入力を作る（DEMO 月に切替）』** を押す（わざと間違いを含んだ入力が入る）
 3. **『見直し』** で Claude の指摘を見る → **『集計を出す』** で業者ごとの表と金額を見る
 
+### Claude API の料金について
+
+- 用紙の写真の読み取り・ラベル写真の照合・見直しの説明・読みの付与は **Claude API** を使う。使うたびに API の料金がかかる
+- 公開版で試すと、作者の API キーで料金がかかる。恐れ入りますが、試すのは**数回程度**にしていただけると助かります
+- 使うモデル：見直し・読みの付与は **Claude Haiku 4.5**、写真の読み取りは **Claude Sonnet 4.6**
+- 写真はスマホの中で**長辺 2000px に縮小してから送る**ので、料金を抑えている
+- Claude API を使わない機能（**オフライン入力・合流・集計・印刷・CSV**）は料金がかからない
+
 ## 画面（架空データ）
 
 | 入力（保管庫で） | 見直し（Claude） | 集計（業者ごと） |
@@ -97,6 +105,15 @@ ANTHROPIC_MODEL_VISION=claude-sonnet-4-6
 Supabase 側は `supabase/schema.sql` と `supabase/members.sql` を SQL Editor で実行。
 テーブル：`suppliers / items / stocktakes / count_entries / label_photos / review_findings / members`。
 ログイン無しの運用のため、匿名（anon）に全操作を許可する RLS。
+
+### Claude API の料金について
+
+- 用紙の写真の読み取り・ラベル写真の照合・見直しの説明・読みの付与は **Claude API** を使う。使うたびに API の料金がかかる
+- 自分で動かす場合は、`ANTHROPIC_API_KEY` に**自分の API キー**を設定する。料金は**設定した人の Anthropic アカウント**にかかる
+- Anthropic の管理画面で **使用額の上限（Usage Limit）** を設定しておくことを強くすすめる
+- 使うモデル：見直し・読みの付与は **Claude Haiku 4.5**、写真の読み取りは **Claude Sonnet 4.6**
+- 写真はスマホの中で**長辺 2000px に縮小してから送る**ので、料金を抑えている
+- Claude API を使わない機能（**オフライン入力・合流・集計・印刷・CSV**）は料金がかからない
 
 ## テスト
 
