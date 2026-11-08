@@ -19,14 +19,15 @@ create trigger trg_members_updated_at
   before update on public.members
   for each row execute function public.set_updated_at();
 
--- RLS：ログイン無しの運用に合わせて anon に全操作を許可
+-- RLS：ログイン無しの運用に合わせて anon に select / insert / update を許可
+-- delete は許可しない（一覧から外すのは active=false で表現）
 alter table public.members enable row level security;
 
 do $$
 declare op text;
 declare pol text;
 begin
-  for op in select unnest(array['select','insert','update','delete']) loop
+  for op in select unnest(array['select','insert','update']) loop
     pol := format('members_%s_anon', op);
     execute format('drop policy if exists %I on public.members;', pol);
     if op = 'select' then
@@ -39,16 +40,13 @@ begin
         'create policy %I on public.members for insert to anon with check (true);',
         pol
       );
-    elsif op = 'update' then
+    else
       execute format(
         'create policy %I on public.members for update to anon using (true) with check (true);',
         pol
       );
-    else
-      execute format(
-        'create policy %I on public.members for delete to anon using (true);',
-        pol
-      );
     end if;
   end loop;
+  -- 念のため古い delete policy が残っていたら消す
+  execute 'drop policy if exists members_delete_anon on public.members';
 end$$;

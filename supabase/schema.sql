@@ -153,8 +153,8 @@ end$$;
 
 -- =========================================================
 -- Row Level Security
--- ログイン無しの運用：匿名ロール（anon）に全操作を許可する
--- ※現場利用者のみが知る URL と Supabase の anon key で保護する前提
+-- ログイン無しの運用：匿名ロール（anon）に select / insert / update を許可
+-- delete は許可しない（アプリは Supabase の行を消さない）
 -- =========================================================
 alter table public.suppliers       enable row level security;
 alter table public.items           enable row level security;
@@ -172,7 +172,7 @@ begin
   for tbl in select unnest(array[
     'suppliers','items','stocktakes','count_entries','label_photos','review_findings'
   ]) loop
-    for op in select unnest(array['select','insert','update','delete']) loop
+    for op in select unnest(array['select','insert','update']) loop
       pol := format('%s_%s_anon', tbl, op);
       execute format('drop policy if exists %I on public.%I;', pol, tbl);
       if op = 'select' then
@@ -185,18 +185,16 @@ begin
           'create policy %I on public.%I for insert to anon with check (true);',
           pol, tbl
         );
-      elsif op = 'update' then
+      else
         execute format(
           'create policy %I on public.%I for update to anon using (true) with check (true);',
           pol, tbl
         );
-      else
-        execute format(
-          'create policy %I on public.%I for delete to anon using (true);',
-          pol, tbl
-        );
       end if;
     end loop;
+    -- 念のため古い delete policy が残っていたら消す
+    execute format('drop policy if exists %I on public.%I;',
+      format('%s_delete_anon', tbl), tbl);
   end loop;
 end$$;
 
