@@ -110,7 +110,7 @@ ANTHROPIC_MODEL_VISION=claude-sonnet-4-6
 
 Supabase 側は `supabase/schema.sql` と `supabase/members.sql` を SQL Editor で実行。
 テーブル：`suppliers / items / stocktakes / count_entries / label_photos / review_findings / members`。
-ログイン無しの運用のため、匿名（anon）に全操作を許可する RLS。
+ログイン無しの運用のため、匿名（anon）には読み取り・追加・更新だけを許可する RLS。アプリはサーバーの行を消さないので、削除は許可していない。
 
 ### Claude API の料金について（自分で動かす人へ）
 
@@ -131,7 +131,7 @@ npx playwright test  # E2E
 - Supabase の anon キーは画面側に出るが、`.env.local` と Vercel の環境変数で管理し、**ログインを作らない前提**の運用。公開版の URL は公開している
 - Claude API キーは**サーバー側だけ**で使い、画面側コードや GitHub に出さない
 - 写真はアプリのサーバーには保存しない（読み取りのときだけ Claude API に送る）
-- **ログインが無いため、URL とキーが漏れた場合は誰でも書き込めてしまう**（審査提出時点の限界）。本番運用には Supabase Auth ＋ RLS ポリシーの導入が別途必要
+- **ログインが無いため、URL とキーが漏れた場合は誰でも書き込めてしまう**（審査提出時点の限界）。ただし削除はできないようにしている（anon の delete policy を外した）。本番運用には Supabase Auth ＋ RLS ポリシーの導入が別途必要
 - 実在の取引先名・商品名は含めない。デモデータは架空（`src/lib/demoData.ts`）
 
 ## 開発期間
